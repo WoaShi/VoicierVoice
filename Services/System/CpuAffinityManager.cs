@@ -105,7 +105,7 @@ public sealed class CpuAffinityManager
 
         if (!useGroupAffinity)
         {
-            UIntPtr prev = NativeMethods.SetThreadAffinityMask(currentThread, new UIntPtr(mask));
+            UIntPtr prev = NativeMethods.SetThreadAffinityMask(currentThread, ToNativeAffinityMask(mask));
             if (prev != UIntPtr.Zero)
             {
                 return new AffinityBindResult(
@@ -129,7 +129,7 @@ public sealed class CpuAffinityManager
 
         var groupAffinity = new NativeMethods.GroupAffinity
         {
-            Mask = new UIntPtr(mask),
+            Mask = ToNativeAffinityMask(mask),
             Group = processorGroup
         };
 
@@ -197,7 +197,7 @@ public sealed class CpuAffinityManager
             {
                 if (!useGroupAffinity)
                 {
-                    if (NativeMethods.SetThreadAffinityMask(hThread, new UIntPtr(mask)) != UIntPtr.Zero)
+                    if (NativeMethods.SetThreadAffinityMask(hThread, ToNativeAffinityMask(mask)) != UIntPtr.Zero)
                     {
                         boundCount++;
                     }
@@ -206,7 +206,7 @@ public sealed class CpuAffinityManager
                 {
                     var ga = new NativeMethods.GroupAffinity
                     {
-                        Mask = new UIntPtr(mask),
+                        Mask = ToNativeAffinityMask(mask),
                         Group = processorGroup
                     };
                     if (NativeMethods.SetThreadGroupAffinity(hThread, ref ga, out _))
@@ -222,6 +222,13 @@ public sealed class CpuAffinityManager
         }
 
         return boundCount;
+    }
+
+    private static UIntPtr ToNativeAffinityMask(ulong mask)
+    {
+        return Environment.Is64BitProcess
+            ? new UIntPtr(mask)
+            : new UIntPtr((uint)(mask & uint.MaxValue));
     }
 
     private static CpuTopologyInfo QueryTopologyCore()

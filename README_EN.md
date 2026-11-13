@@ -70,7 +70,9 @@ To route processed audio into third-party voice, meeting, or recording applicati
 
 ---
 
-## Build from Source
+## Build and Release Packaging
+
+### 1. Local Build & Self-Test
 
 ```powershell
 # 1. Clone the repository
@@ -89,6 +91,17 @@ dotnet build VoicierVoice.csproj -c Release
 # 5. Launch the application
 dotnet run --project VoicierVoice.csproj -c Release
 ```
+
+### 2. Self-Contained Multi-Architecture Release Packages
+
+```powershell
+# Generate self-contained single-file release zips (win-x64 and win-arm64) and SHA256SUMS.txt under dist/
+powershell -ExecutionPolicy Bypass -File scripts/build_releases.ps1 -Version 1.0.0
+```
+
+- `win-x64`: Bundles .NET 10 Desktop Runtime and `Microsoft.ML.OnnxRuntime.Gpu` (supports both CPU and NVIDIA CUDA GPU acceleration).
+- `win-arm64`: Bundles .NET 10 Desktop Runtime and `Microsoft.ML.OnnxRuntime` (CPU execution provider for Windows on ARM64).
+- Note: 32-bit `win-x86` is excluded from default release distribution because 32-bit x86 inference for VoxLock INT8 measured `RTF=1.400`, which exceeds real-time (`< 1.0`).
 
 ---
 

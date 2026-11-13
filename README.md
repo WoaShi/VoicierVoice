@@ -70,7 +70,9 @@
 
 ---
 
-## 从源码构建
+## 从源码构建与打包分发
+
+### 1. 日常构建与测试
 
 ```powershell
 # 1. 克隆仓库
@@ -89,6 +91,17 @@ dotnet build VoicierVoice.csproj -c Release
 # 5. 启动应用
 dotnet run --project VoicierVoice.csproj -c Release
 ```
+
+### 2. 自包含多架构 Release 打包
+
+```powershell
+# 在 dist/ 下生成自包含单文件 Release 压缩包（默认 win-x64 与 win-arm64）及 SHA256SUMS.txt
+powershell -ExecutionPolicy Bypass -File scripts/build_releases.ps1 -Version 1.0.0
+```
+
+- `win-x64`：内置 .NET 10 桌面运行时与 `Microsoft.ML.OnnxRuntime.Gpu`，支持 CPU 与 NVIDIA CUDA GPU 加速。
+- `win-arm64`：内置 .NET 10 桌面运行时与 `Microsoft.ML.OnnxRuntime`（CPU 执行后端），适用于 Windows on ARM64 设备。
+- 注：已跳过 32 位 `win-x86` 作为正式分发目标，实测 32 位架构运行 VoxLock INT8 推理的 RTF 约为 1.40（无法维持低于 1.0 的实时率）。
 
 ---
 
