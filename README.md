@@ -3,15 +3,15 @@
   <h1>VoicierVoice</h1>
   <p>
     <strong>面向 Windows 的超低延迟实时声纹降噪与目标人声提取桌面应用</strong><br />
-    Real-Time Voiceprint Isolation &amp; Target-Speaker Denoising for Windows (WPF · Fluent 2 · ONNX)
+    Real-Time Voiceprint Isolation &amp; Target-Speaker Denoising for Windows (WPF / Fluent 2 / ONNX)
   </p>
 </div>
 
 ---
 
-## ✨ 简介 | Introduction
+## 简介 | Introduction
 
-**VoicierVoice** 是一款运行于 Windows 10 / 11 的实时个人声纹提取与语音降噪工具。通过串联 **Silero VAD（语音活动检测） → GTCRN（前置流式降噪） → VoxLock（目标人声锁相提取）** 三级级联神经网络管线，只需录制 5 秒个人人声样本，即可在实时通话、游戏开黑或直播场景中精准保留你的声音，同时消除键盘敲击、风扇底噪以及周围旁人交谈干扰。
+**VoicierVoice** 是一款基于 **[VoxLock](https://github.com/arbazsiddiqui/voxlock)** 的 Windows 10 / 11 实时个人声纹提取与语音降噪桌面应用。通过串联 **Silero VAD（语音活动检测） → GTCRN（前置流式降噪） → VoxLock（目标人声锁相提取）** 三级级联神经网络管线，只需录制 5 秒个人人声样本，即可在实时通话、游戏开黑或直播场景中精准保留你的声音，同时消除键盘敲击、风扇底噪以及周围旁人交谈干扰。
 
 ### 核心特性
 - **三级级联实时 AI 管线**：
@@ -24,7 +24,7 @@
 
 ---
 
-## 📦 依赖与技术栈 | Dependencies & Acknowledgements
+## 依赖与技术栈 | Dependencies & Acknowledgements
 
 ### 1. 核心算法与神经网络模型
 - **[VoxLock](https://github.com/arbazsiddiqui/voxlock)**（核心声纹提取引擎）  
@@ -49,7 +49,7 @@
 
 ---
 
-## 🚀 使用说明 | Usage Guide
+## 使用说明 | Usage Guide
 
 ### 1. 准备工作：配置虚拟声卡（可选但推荐）
 如果你希望将降噪后的纯净人声输出给通话软件、会议或游戏内语音：
@@ -73,7 +73,7 @@
 
 ---
 
-## 🛠️ 从源码构建 | Build from Source
+## 从源码构建 | Build from Source
 
 ```powershell
 # 1. 克隆仓库
@@ -95,10 +95,16 @@ dotnet run --project VoicierVoice.csproj -c Release
 
 ---
 
-## 🙏 致谢 | Acknowledgements
+## 致谢 | Acknowledgements
 
 特别感谢以下核心项目与社区贡献者的开源成果：
-- **[arbazsiddiqui/voxlock](https://github.com/arbazsiddiqui/voxlock)** —— 提供核心目标说话人锁相提取与声纹模型能力
-- **[snakers4/silero-vad](https://github.com/snakers4/silero-vad)** —— Silero VAD 实时语音活动检测
-- **[Xiaobin-Rong/gtcrn](https://github.com/Xiaobin-Rong/gtcrn)** & **[k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)** —— GTCRN 轻量流式语音增强模型
-- **[NAudio](https://github.com/naudio/NAudio)** · **[ONNX Runtime](https://github.com/microsoft/onnxruntime)** · **[CommunityToolkit](https://github.com/CommunityToolkit/dotnet)**
+- **[arbazsiddiqui/voxlock](https://github.com/arbazsiddiqui/voxlock)**：提供核心目标说话人锁相提取与声纹模型能力
+- **[snakers4/silero-vad](https://github.com/snakers4/silero-vad)**：Silero VAD 实时语音活动检测
+- **[Xiaobin-Rong/gtcrn](https://github.com/Xiaobin-Rong/gtcrn)** & **[k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)**：GTCRN 轻量流式语音增强模型
+- **[NAudio](https://github.com/naudio/NAudio)**, **[ONNX Runtime](https://github.com/microsoft/onnxruntime)**, **[CommunityToolkit](https://github.com/CommunityToolkit/dotnet)**
+
+---
+
+## 许可证 | License
+
+本项目基于 [Apache License 2.0](LICENSE) 开源协议发布。详情请参见仓库根目录的 [LICENSE](LICENSE) 文件。
