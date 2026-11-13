@@ -1,5 +1,9 @@
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using VoiceLockStudio.Services.Localization;
 
 namespace VoiceLockStudio.Services.System;
 
@@ -43,18 +47,28 @@ public sealed class TrayIconService : IDisposable
     private readonly IntPtr _idleIconHandle;
     private readonly IntPtr _activeIconHandle;
 
-    private string _tooltipText = "VoiceLock Studio - 已就绪";
+    private string _tooltipText = AppStrings.Current.TrayReadyTip;
+    private string? _lastStatusText;
     private bool _isRunning;
     private bool _iconAdded;
     private bool _disposed;
 
     public TrayIconService()
     {
-        _idleIconHandle = CreateMicrophoneBadgeIcon(active: false);
-        _activeIconHandle = CreateMicrophoneBadgeIcon(active: true);
+        _idleIconHandle = TryCreateBrandIcon(active: false);
+        if (_idleIconHandle == IntPtr.Zero)
+        {
+            _idleIconHandle = CreateMicrophoneBadgeIcon(active: false);
+        }
+
+        _activeIconHandle = TryCreateBrandIcon(active: true);
+        if (_activeIconHandle == IntPtr.Zero)
+        {
+            _activeIconHandle = CreateMicrophoneBadgeIcon(active: true);
+        }
         _taskbarCreatedMsg = NativeMethods.RegisterWindowMessageW("TaskbarCreated");
 
-        var parameters = new HwndSourceParameters("VoiceLockTrayMessageWindow")
+        var parameters = new HwndSourceParameters("VoicierVoiceTrayMessageWindow")
         {
             Width = 0,
             Height = 0,
@@ -81,19 +95,28 @@ public sealed class TrayIconService : IDisposable
         }
 
         _isRunning = isRunning;
+        _lastStatusText = statusText;
+        _tooltipText = AppStrings.Current.FormatTrayTooltip(statusText, isRunning);
 
-        string cleanStatus = string.IsNullOrWhiteSpace(statusText)
-            ? (isRunning ? "运行中" : "已停止")
-            : statusText.Trim();
+        ApplyIconAndTooltip();
+    }
 
-        string tip = $"VoiceLock Studio - {cleanStatus}";
-        if (tip.Length > 127)
+    public void UpdateLocalization()
+    {
+        if (_disposed)
         {
-            tip = tip[..127];
+            return;
         }
 
-        _tooltipText = tip;
+        _tooltipText = string.IsNullOrWhiteSpace(_lastStatusText)
+            ? AppStrings.Current.TrayReadyTip
+            : AppStrings.Current.FormatTrayTooltip(_lastStatusText, _isRunning);
 
+        ApplyIconAndTooltip();
+    }
+
+    private void ApplyIconAndTooltip()
+    {
         if (!_iconAdded)
         {
             AddTrayIcon();
@@ -175,11 +198,11 @@ public sealed class TrayIconService : IDisposable
 
         try
         {
-            NativeMethods.AppendMenuW(menu, MfString, CmdShowWindow, "显示主窗口");
+            NativeMethods.AppendMenuW(menu, MfString, CmdShowWindow, AppStrings.Current.TrayShowWindow);
             uint toggleFlags = MfString | (_isRunning ? MfChecked : MfUnchecked);
-            NativeMethods.AppendMenuW(menu, toggleFlags, CmdTogglePipeline, "启用/暂停降噪");
+            NativeMethods.AppendMenuW(menu, toggleFlags, CmdTogglePipeline, AppStrings.Current.TrayTogglePipeline);
             NativeMethods.AppendMenuW(menu, MfSeparator, 0, string.Empty);
-            NativeMethods.AppendMenuW(menu, MfString, CmdExit, "退出程序");
+            NativeMethods.AppendMenuW(menu, MfString, CmdExit, AppStrings.Current.TrayExit);
 
             NativeMethods.GetCursorPos(out NativeMethods.Point pt);
             NativeMethods.SetForegroundWindow(_messageWindow.Handle);
@@ -212,6 +235,132 @@ public sealed class TrayIconService : IDisposable
         finally
         {
             NativeMethods.DestroyMenu(menu);
+        }
+    }
+
+    private static unsafe IntPtr TryCreateBrandIcon(bool active)
+    {
+        const int size = 32;
+        try
+        {
+            var uri = new Uri("pack://application:,,,/VoicierVoice;component/Assets/Icons/VoicierVoice.png", UriKind.Absolute);
+            var streamInfo = global::System.Windows.Application.GetResourceStream(uri);
+            if (streamInfo?.Stream is null)
+            {
+                return IntPtr.Zero;
+            }
+
+            byte[] buffer = new byte[size * size * 4];
+            using (Stream stream = streamInfo.Stream)
+            {
+                var bitmap = new BitmapImage();
+                bitmap.BeginInit();
+                bitmap.StreamSource = stream;
+                bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                bitmap.DecodePixelWidth = size;
+                bitmap.DecodePixelHeight = size;
+                bitmap.EndInit();
+                bitmap.Freeze();
+
+                BitmapSource pbgra = bitmap.Format == PixelFormats.Pbgra32
+                    ? bitmap
+                    : new FormatConvertedBitmap(bitmap, PixelFormats.Pbgra32, null, 0);
+                pbgra.CopyPixels(buffer, size * 4, 0);
+            }
+
+            if (active)
+            {
+                // Draw a crisp emerald status dot at bottom-right so active vs idle stays legible in tray.
+                const float dotCx = 25.0f;
+                const float dotCy = 25.0f;
+                const float dotOuterR = 5.4f;
+                const float dotInnerR = 3.8f;
+
+                for (int y = 0; y < size; y++)
+                {
+                    for (int x = 0; x < size; x++)
+                    {
+                        float dx = x - dotCx;
+                        float dy = y - dotCy;
+                        float dist = MathF.Sqrt(dx * dx + dy * dy);
+                        if (dist > dotOuterR + 0.5f)
+                        {
+                            continue;
+                        }
+
+                        int idx = (y * size + x) * 4;
+                        if (dist <= dotInnerR)
+                        {
+                            // Emerald dot (#10B981)
+                            buffer[idx + 0] = 0x81;
+                            buffer[idx + 1] = 0xB9;
+                            buffer[idx + 2] = 0x10;
+                            buffer[idx + 3] = 0xFF;
+                        }
+                        else
+                        {
+                            float rimAlpha = Math.Clamp(dotOuterR + 0.5f - dist, 0f, 1f);
+                            byte a = (byte)Math.Round(rimAlpha * 255f);
+                            if (a > buffer[idx + 3])
+                            {
+                                buffer[idx + 0] = a;
+                                buffer[idx + 1] = a;
+                                buffer[idx + 2] = a;
+                                buffer[idx + 3] = a;
+                            }
+                        }
+                    }
+                }
+            }
+
+            var bmi = new NativeMethods.BitmapInfo
+            {
+                bmiHeader = new NativeMethods.BitmapInfoHeader
+                {
+                    biSize = Marshal.SizeOf<NativeMethods.BitmapInfoHeader>(),
+                    biWidth = size,
+                    biHeight = -size,
+                    biPlanes = 1,
+                    biBitCount = 32,
+                    biCompression = 0
+                }
+            };
+
+            IntPtr hdcScreen = NativeMethods.GetDC(IntPtr.Zero);
+            IntPtr colorBitmap = NativeMethods.CreateDIBSection(hdcScreen, ref bmi, 0, out IntPtr bitsPtr, IntPtr.Zero, 0);
+            NativeMethods.ReleaseDC(IntPtr.Zero, hdcScreen);
+
+            if (colorBitmap == IntPtr.Zero || bitsPtr == IntPtr.Zero)
+            {
+                return IntPtr.Zero;
+            }
+
+            IntPtr maskBitmap = NativeMethods.CreateBitmap(size, size, 1, 1, IntPtr.Zero);
+            try
+            {
+                Marshal.Copy(buffer, 0, bitsPtr, buffer.Length);
+                var iconInfo = new NativeMethods.IconInfo
+                {
+                    fIcon = true,
+                    xHotspot = 0,
+                    yHotspot = 0,
+                    hbmMask = maskBitmap,
+                    hbmColor = colorBitmap
+                };
+                return NativeMethods.CreateIconIndirect(ref iconInfo);
+            }
+            finally
+            {
+                NativeMethods.DeleteObject(colorBitmap);
+                if (maskBitmap != IntPtr.Zero)
+                {
+                    NativeMethods.DeleteObject(maskBitmap);
+                }
+            }
+        }
+        catch
+        {
+            return IntPtr.Zero;
         }
     }
 

@@ -1,0 +1,79 @@
+<UserControl x:Class="VoiceLockStudio.Controls.KaomojiStatusView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid VerticalAlignment="Center"
+          HorizontalAlignment="Left">
+        <!-- Pose 1 & 2: Idle ( • vv • ) and Standby d( • vv • )b -->
+        <StackPanel x:Name="CalmPanel"
+                    Orientation="Horizontal"
+                    VerticalAlignment="Center">
+            <TextBlock x:Name="LeftHeadphone"
+                       Text="d"
+                       FontFamily="Segoe UI Variable Display, Segoe UI"
+                       FontSize="22"
+                       Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                       Visibility="Collapsed"
+                       VerticalAlignment="Center" />
+            <TextBlock Text="( • "
+                       FontFamily="Segoe UI Variable Display, Segoe UI"
+                       FontSize="22"
+                       Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                       VerticalAlignment="Center" />
+            <TextBlock x:Name="MouthV1"
+                       Text="v"
+                       FontFamily="Segoe UI Variable Display, Segoe UI"
+                       FontSize="22"
+                       Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                       VerticalAlignment="Center" />
+            <TextBlock x:Name="MouthV2"
+                       Text="v"
+                       FontFamily="Segoe UI Variable Display, Segoe UI"
+                       FontSize="22"
+                       Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                       VerticalAlignment="Center" />
+            <TextBlock Text=" • )"
+                       FontFamily="Segoe UI Variable Display, Segoe UI"
+                       FontSize="22"
+                       Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                       VerticalAlignment="Center" />
+            <TextBlock x:Name="RightHeadphone"
+                       Text="b"
+                       FontFamily="Segoe UI Variable Display, Segoe UI"
+                       FontSize="22"
+                       Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                       Visibility="Collapsed"
+                       VerticalAlignment="Center" />
+        </StackPanel>
+
+        <!-- Pose 3: Actively Isolating Speech d( ^ ∀ ^ )b (∀ rendered as inverted capital A) -->
+        <StackPanel x:Name="SpeakingPanel"
+                    Orientation="Horizontal"
+                    VerticalAlignment="Center"
+                    Visibility="Collapsed">
+            <TextBlock Text="d( ^ "
+                       FontFamily="Segoe UI Variable Display, Segoe UI"
+                       FontSize="22"
+                       Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                       VerticalAlignment="Center" />
+            <TextBlock x:Name="InvertedMouthA"
+                       Text="A"
+                       FontFamily="Segoe UI Variable Display, Segoe UI"
+                       FontSize="22"
+                       Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                       VerticalAlignment="Center"
+                       RenderTransformOrigin="0.5,0.5">
+                <TextBlock.RenderTransform>
+                    <TransformGroup>
+                        <RotateTransform Angle="180" />
+                        <TranslateTransform Y="1" />
+                    </TransformGroup>
+                </TextBlock.RenderTransform>
+            </TextBlock>
+            <TextBlock Text=" ^ )b"
+                       FontFamily="Segoe UI Variable Display, Segoe UI"
+                       FontSize="22"
+                       Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                       VerticalAlignment="Center" />
+        </StackPanel>
+    </Grid>
+</UserControl>

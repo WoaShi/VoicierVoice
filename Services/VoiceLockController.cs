@@ -2,6 +2,7 @@ using System.IO;
 using VoiceLockStudio.Models;
 using VoiceLockStudio.Services.Audio;
 using VoiceLockStudio.Services.Backends;
+using VoiceLockStudio.Services.Localization;
 using VoiceLockStudio.Services.System;
 
 namespace VoiceLockStudio.Services;
@@ -60,8 +61,9 @@ public sealed class VoiceLockController : IDisposable
     public VoiceprintProfileInfo? CurrentVoiceprint => _voxLockBackend.CurrentVoiceprint;
     public bool HasEnrolledVoiceprint => _voxLockBackend.HasEnrolledVoiceprint;
 
-    public string ActiveProviderSummary { get; private set; } = "CPU (Single-Thread Lock-Core)";
+    public string ActiveProviderSummary { get; private set; } = AppStrings.Current.FormatBackendBanner(ComputeBackend.Cpu);
     public string? ProviderFallbackWarning { get; private set; }
+    public bool IsCudaFallbackActive { get; private set; }
 
     public string VadActiveProvider => _vadStage.ActiveProviderName;
     public string GtcrnActiveProvider => _gtcrnStage.ActiveProviderName;
@@ -240,6 +242,14 @@ public sealed class VoiceLockController : IDisposable
         _settings.Save();
 
         _pipelineEngine.UpdateCpuAffinity(autoAffinityEnabled, selectedCoreMask, processorGroup);
+    }
+
+    public void UpdateAppPreferences(AppLanguage language, AppThemePreference themePreference, bool minimizeToTrayEnabled)
+    {
+        _settings.Language = language;
+        _settings.ThemePreference = themePreference;
+        _settings.MinimizeToTrayEnabled = minimizeToTrayEnabled;
+        _settings.Save();
     }
 
     /// <summary>
@@ -455,19 +465,22 @@ public sealed class VoiceLockController : IDisposable
             bool cudaActive = string.Equals(_voxLockBackend.ActiveProviderName, "CUDAExecutionProvider", StringComparison.OrdinalIgnoreCase);
             if (cudaActive && string.IsNullOrEmpty(_voxLockBackend.ProviderFallbackMessage))
             {
-                ActiveProviderSummary = "CUDA (VoxLock GPU) + CPU (VAD/GTCRN)";
+                IsCudaFallbackActive = false;
+                ActiveProviderSummary = AppStrings.Current.FormatBackendBanner(ComputeBackend.Cuda, isFallback: false);
                 ProviderFallbackWarning = null;
             }
             else
             {
-                ActiveProviderSummary = "CPU (CUDA Fallback)";
+                IsCudaFallbackActive = true;
+                ActiveProviderSummary = AppStrings.Current.FormatBackendBanner(ComputeBackend.Cuda, isFallback: true);
                 ProviderFallbackWarning = _voxLockBackend.ProviderFallbackMessage
-                    ?? "CUDA 执行提供程序不可用，VoxLock 已自动回退至 CPU 单线程模式。";
+                    ?? AppStrings.Current.FormatCudaFallbackDefault();
             }
         }
         else
         {
-            ActiveProviderSummary = "CPU (Single-Thread Lock-Core)";
+            IsCudaFallbackActive = false;
+            ActiveProviderSummary = AppStrings.Current.FormatBackendBanner(ComputeBackend.Cpu, isFallback: false);
             ProviderFallbackWarning = null;
         }
     }

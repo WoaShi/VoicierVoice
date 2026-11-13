@@ -8,6 +8,7 @@ using NAudio.Wave;
 using VoiceLockStudio.Models;
 using VoiceLockStudio.Services.Audio;
 using VoiceLockStudio.Services.Backends;
+using VoiceLockStudio.Services.Localization;
 using VoiceLockStudio.Services.System;
 using VoiceLockStudio.ViewModels;
 
@@ -39,7 +40,7 @@ public static class SelfTestRunner
             logWriter.WriteLine(formatted);
         }
 
-        Log("=== VoiceLock Studio Self-Test Started ===");
+        Log("=== VoicierVoice Self-Test Started ===");
         Log($"BaseDirectory: {AppContext.BaseDirectory}");
 
         try
@@ -104,7 +105,7 @@ public static class SelfTestRunner
                 (string.IsNullOrEmpty(voxCuda.ProviderFallbackMessage) ? string.Empty : $", Fallback='{voxCuda.ProviderFallbackMessage}'"));
 
             // 4. Isolated Golden Voiceprint enrollment + cache roundtrip (preserve user's real AppData files)
-            string tempDir = Path.Combine(Path.GetTempPath(), $"VoiceLockSelfTest_{Guid.NewGuid():N}");
+            string tempDir = Path.Combine(Path.GetTempPath(), $"VoicierVoiceSelfTest_{Guid.NewGuid():N}");
             string backupDir = Path.Combine(VoiceprintStorage.AppDataDirectory, $"_selftest_backup_{Guid.NewGuid():N}");
             Directory.CreateDirectory(tempDir);
 
@@ -176,16 +177,78 @@ public static class SelfTestRunner
                 TryDeleteDirectory(tempDir);
             }
 
-            // 6. MainViewModel + DwmBackdropHelper + TrayIconService + MainWindow UI Smoke Test
+            // 6. AppSettings + AppStrings + MainViewModel + DwmBackdropHelper + TrayIconService + MainWindow UI Smoke Test
+            if (!string.Equals(Path.GetFileName(AppSettings.GetAppDataDirectory()), "VoicierVoice", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException($"Expected AppData folder 'VoicierVoice', got '{AppSettings.GetAppDataDirectory()}'.");
+            }
+
+            AppLanguage originalLang = AppStrings.Current.Language;
+            try
+            {
+                AppStrings.Current.SetLanguage(AppLanguage.EnUs);
+                if (!string.Equals(AppStrings.Current.NavPipelineTitle, "Home", StringComparison.Ordinal) ||
+                    !string.Equals(AppStrings.Current.NavVoiceprintTitle, "Voiceprint", StringComparison.Ordinal) ||
+                    !string.Equals(AppStrings.Current.NavComputeTitle, "CPU&GPU", StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("AppStrings failed to switch to EnUs.");
+                }
+
+                AppStrings.Current.SetLanguage(AppLanguage.ZhCn);
+                if (!string.Equals(AppStrings.Current.NavPipelineTitle, "主页", StringComparison.Ordinal) ||
+                    !string.Equals(AppStrings.Current.NavVoiceprintTitle, "声纹", StringComparison.Ordinal) ||
+                    !string.Equals(AppStrings.Current.NavComputeTitle, "CPU&GPU", StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("AppStrings failed to switch to ZhCn.");
+                }
+            }
+            finally
+            {
+                AppStrings.Current.SetLanguage(originalLang);
+            }
+
             using (var tray = new TrayIconService())
             {
                 tray.UpdateStatus("SelfTest", isRunning: false);
+                tray.UpdateLocalization();
             }
 
             using (var controller = new VoiceLockController(AppContext.BaseDirectory))
             using (var vm = new MainViewModel(controller))
             {
                 await vm.InitializeAsync();
+
+                // Verify virtual audio endpoint recognition (VB-Cable + VoiceMeeter series)
+                if (!AudioDeviceService.IsVirtualEndpoint("CABLE Input (VB-Audio Virtual Cable)", "VB-Audio Virtual Cable") ||
+                    !AudioDeviceService.IsVirtualEndpoint("VoiceMeeter Input (VB-Audio VoiceMeeter VAIO)", "VB-Audio VoiceMeeter VAIO") ||
+                    !AudioDeviceService.IsVirtualEndpoint("VoiceMeeter Aux Input (VB-Audio VoiceMeeter AUX VAIO)", "VB-Audio VoiceMeeter AUX VAIO") ||
+                    !AudioDeviceService.IsVirtualEndpoint("VAIO3 Input (VB-Audio VoiceMeeter VAIO3)", "VB-Audio VoiceMeeter VAIO3") ||
+                    AudioDeviceService.IsVirtualEndpoint("Speakers (Realtek(R) Audio)", "Realtek High Definition Audio"))
+                {
+                    throw new InvalidOperationException("Virtual endpoint recognition test failed.");
+                }
+
+                // Verify Back navigation history behavior
+                if (vm.CanNavigateBack)
+                {
+                    throw new InvalidOperationException("Expected CanNavigateBack=false on initial tab.");
+                }
+                vm.ActiveTab = NavigationTab.Voiceprint;
+                vm.ActiveTab = NavigationTab.Compute;
+                if (!vm.CanNavigateBack || !vm.NavigateBackCommand.CanExecute(null))
+                {
+                    throw new InvalidOperationException("Expected CanNavigateBack=true after tab switches.");
+                }
+                vm.NavigateBackCommand.Execute(null);
+                if (vm.ActiveTab != NavigationTab.Voiceprint || !vm.CanNavigateBack)
+                {
+                    throw new InvalidOperationException($"Expected Back to return to Voiceprint, got {vm.ActiveTab}.");
+                }
+                vm.NavigateBackCommand.Execute(null);
+                if (vm.ActiveTab != NavigationTab.Pipeline || vm.CanNavigateBack)
+                {
+                    throw new InvalidOperationException($"Expected Back to return to Pipeline with empty history, got {vm.ActiveTab}.");
+                }
 
                 var window = new MainWindow
                 {
@@ -198,6 +261,7 @@ public static class SelfTestRunner
                 window.Closed += (_, _) => closed = true;
                 window.Show();
                 await Dispatcher.Yield(DispatcherPriority.Loaded);
+                DwmBackdropHelper.ApplyThemePreference(controller.Settings.ThemePreference);
                 bool darkTheme = DwmBackdropHelper.IsDarkThemeActive();
                 if (!closed)
                 {

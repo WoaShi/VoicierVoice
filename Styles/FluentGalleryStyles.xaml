@@ -1,0 +1,634 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:converters="clr-namespace:VoiceLockStudio.Converters"
+                    xmlns:loc="clr-namespace:VoiceLockStudio.Services.Localization"
+                    xmlns:audio="clr-namespace:VoiceLockStudio.Services.Audio">
+
+    <FontFamily x:Key="MonoFontFamily">Cascadia Mono, Consolas, Courier New</FontFamily>
+
+    <!-- Shared Converters -->
+    <converters:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+    <converters:InverseBoolConverter x:Key="InverseBoolConverter" />
+    <converters:VoxLockVariantLabelConverter x:Key="VoxLockVariantLabelConverter" />
+    <converters:EnumToBoolConverter x:Key="EnumToBoolConverter" />
+
+    <!-- Language-Aware Typography Styles (Soften heavy CJK Bold while keeping EnUs crisp) -->
+    <Style x:Key="GalleryPageTitleTextStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="24" />
+        <Setter Property="FontWeight" Value="{Binding Source={x:Static loc:AppStrings.Current}, Path=HeadingFontWeight}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+    </Style>
+
+    <Style x:Key="GallerySectionTitleTextStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="14" />
+        <Setter Property="FontWeight" Value="{Binding Source={x:Static loc:AppStrings.Current}, Path=StrongFontWeight}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+    </Style>
+
+    <!-- WPFGallery Surface Cards -->
+    <Style x:Key="GalleryCardStyle" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="18,16" />
+    </Style>
+
+    <Style x:Key="GallerySubCardStyle" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorSecondaryBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Padding" Value="14,12" />
+    </Style>
+
+    <Style x:Key="GalleryGuidanceCardStyle" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorSecondaryBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="16,14" />
+    </Style>
+
+    <Style x:Key="GalleryKpiCardStyle" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="16,12" />
+    </Style>
+
+    <Style x:Key="GallerySettingsRowStyle" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="18,14" />
+    </Style>
+
+    <!-- Win11 NavigationViewItem-style Left Rail Tab -->
+    <Style x:Key="NavigationRailItemStyle" TargetType="RadioButton">
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Height" Value="38" />
+        <Setter Property="Margin" Value="8,2" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        <Setter Property="FontSize" Value="13.5" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border x:Name="ItemRoot"
+                            CornerRadius="6"
+                            Background="{DynamicResource SubtleFillColorTransparentBrush}"
+                            Padding="8,0,12,0">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="3" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border x:Name="AccentIndicator"
+                                    Grid.Column="0"
+                                    Width="3"
+                                    Height="16"
+                                    CornerRadius="1.5"
+                                    Background="{DynamicResource AccentFillColorDefaultBrush}"
+                                    VerticalAlignment="Center"
+                                    Visibility="Collapsed" />
+
+                            <TextBlock x:Name="NavIcon"
+                                       Grid.Column="1"
+                                       FontFamily="{DynamicResource SymbolThemeFontFamily}"
+                                       Text="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}"
+                                       FontSize="15"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                       VerticalAlignment="Center"
+                                       Margin="10,0,12,0" />
+
+                            <ContentPresenter x:Name="NavContent"
+                                              Grid.Column="2"
+                                              VerticalAlignment="Center"
+                                              HorizontalAlignment="Left"
+                                              RecognizesAccessKey="True" />
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="IsMouseOver" Value="True" />
+                                <Condition Property="IsChecked" Value="False" />
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="ItemRoot" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                            <Setter TargetName="NavIcon" Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                        </MultiTrigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="ItemRoot" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                            <Setter TargetName="AccentIndicator" Property="Visibility" Value="Visible" />
+                            <Setter TargetName="NavIcon" Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                            <Setter Property="FontWeight" Value="{Binding Source={x:Static loc:AppStrings.Current}, Path=StrongFontWeight}" />
+                        </Trigger>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="IsMouseOver" Value="True" />
+                                <Condition Property="IsChecked" Value="True" />
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="ItemRoot" Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+                        </MultiTrigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Fluent 2 ToggleSwitch -->
+    <Style x:Key="FluentToggleSwitchStyle" TargetType="CheckBox">
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Foreground" Value="{DynamicResource ToggleSwitchContentForeground}" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="CheckBox">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Background="Transparent">
+                        <Border x:Name="SwitchTrack"
+                                Width="40"
+                                Height="20"
+                                CornerRadius="10"
+                                BorderThickness="1"
+                                Background="{DynamicResource ToggleSwitchFillOff}"
+                                BorderBrush="{DynamicResource ToggleSwitchStrokeOff}"
+                                VerticalAlignment="Center">
+                            <Grid>
+                                <Ellipse x:Name="SwitchKnob"
+                                         Width="12"
+                                         Height="12"
+                                         Fill="{DynamicResource ToggleSwitchKnobFillOff}"
+                                         HorizontalAlignment="Left"
+                                         VerticalAlignment="Center"
+                                         Margin="3,0,0,0" />
+                            </Grid>
+                        </Border>
+                        <ContentPresenter x:Name="ContentHost"
+                                          Margin="8,0,0,0"
+                                          VerticalAlignment="Center"
+                                          RecognizesAccessKey="True" />
+                    </StackPanel>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="Content" Value="{x:Null}">
+                            <Setter TargetName="ContentHost" Property="Visibility" Value="Collapsed" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="SwitchTrack" Property="Background" Value="{DynamicResource ToggleSwitchFillOn}" />
+                            <Setter TargetName="SwitchTrack" Property="BorderBrush" Value="{DynamicResource ToggleSwitchStrokeOn}" />
+                            <Setter TargetName="SwitchKnob" Property="Fill" Value="{DynamicResource ToggleSwitchKnobFillOn}" />
+                            <Setter TargetName="SwitchKnob" Property="HorizontalAlignment" Value="Right" />
+                            <Setter TargetName="SwitchKnob" Property="Margin" Value="0,0,3,0" />
+                        </Trigger>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="IsMouseOver" Value="True" />
+                                <Condition Property="IsChecked" Value="False" />
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="SwitchTrack" Property="Background" Value="{DynamicResource ToggleSwitchFillOffPointerOver}" />
+                            <Setter TargetName="SwitchTrack" Property="BorderBrush" Value="{DynamicResource ToggleSwitchStrokeOffPointerOver}" />
+                            <Setter TargetName="SwitchKnob" Property="Width" Value="14" />
+                            <Setter TargetName="SwitchKnob" Property="Height" Value="14" />
+                        </MultiTrigger>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="IsMouseOver" Value="True" />
+                                <Condition Property="IsChecked" Value="True" />
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="SwitchTrack" Property="Background" Value="{DynamicResource ToggleSwitchFillOnPointerOver}" />
+                            <Setter TargetName="SwitchTrack" Property="BorderBrush" Value="{DynamicResource ToggleSwitchStrokeOnPointerOver}" />
+                            <Setter TargetName="SwitchKnob" Property="Width" Value="14" />
+                            <Setter TargetName="SwitchKnob" Property="Height" Value="14" />
+                        </MultiTrigger>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="IsEnabled" Value="False" />
+                                <Condition Property="IsChecked" Value="False" />
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="SwitchTrack" Property="Background" Value="{DynamicResource ToggleSwitchFillOffDisabled}" />
+                            <Setter TargetName="SwitchTrack" Property="BorderBrush" Value="{DynamicResource ToggleSwitchStrokeOffDisabled}" />
+                            <Setter TargetName="SwitchKnob" Property="Fill" Value="{DynamicResource ToggleSwitchKnobFillOffDisabled}" />
+                            <Setter Property="Foreground" Value="{DynamicResource ToggleSwitchContentForegroundDisabled}" />
+                        </MultiTrigger>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="IsEnabled" Value="False" />
+                                <Condition Property="IsChecked" Value="True" />
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="SwitchTrack" Property="Background" Value="{DynamicResource ToggleSwitchFillOnDisabled}" />
+                            <Setter TargetName="SwitchTrack" Property="BorderBrush" Value="{DynamicResource ToggleSwitchStrokeOnDisabled}" />
+                            <Setter TargetName="SwitchKnob" Property="Fill" Value="{DynamicResource ToggleSwitchKnobFillOnDisabled}" />
+                            <Setter Property="Foreground" Value="{DynamicResource ToggleSwitchContentForegroundDisabled}" />
+                        </MultiTrigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- CPU Core Matrix Pill Toggle -->
+    <Style x:Key="CorePillToggleStyle" TargetType="ToggleButton">
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Margin" Value="0,0,8,8" />
+        <Setter Property="Padding" Value="12,7" />
+        <Setter Property="MinWidth" Value="92" />
+        <Setter Property="Background" Value="{DynamicResource ControlFillColorDefaultBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="PillBorder"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="6"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="PillBorder" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="PillBorder" Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                            <Setter TargetName="PillBorder" Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                            <Setter Property="Foreground" Value="{DynamicResource TextOnAccentFillColorPrimaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="PillBorder" Property="Opacity" Value="0.55" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Selectable Card RadioButton (Compute Backend Option Cards) -->
+    <Style x:Key="BackendOptionCardStyle" TargetType="RadioButton">
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Grid>
+                        <Border x:Name="CardSurface"
+                                Background="{DynamicResource CardBackgroundFillColorSecondaryBrush}"
+                                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8"
+                                Padding="16,14">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <Grid Grid.Column="0"
+                                      Width="18"
+                                      Height="18"
+                                      VerticalAlignment="Top"
+                                      Margin="0,2,12,0">
+                                    <Ellipse x:Name="RadioOuter"
+                                             Stroke="{DynamicResource ControlStrokeColorSecondaryBrush}"
+                                             StrokeThickness="1.5"
+                                             Fill="{DynamicResource ControlFillColorDefaultBrush}" />
+                                    <Ellipse x:Name="RadioInner"
+                                             Width="8"
+                                             Height="8"
+                                             Fill="{DynamicResource TextOnAccentFillColorPrimaryBrush}"
+                                             Visibility="Collapsed" />
+                                </Grid>
+
+                                <ContentPresenter Grid.Column="1"
+                                                  HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                  VerticalAlignment="Center" />
+                            </Grid>
+                        </Border>
+                        <Border x:Name="SelectedAccentRing"
+                                BorderBrush="{DynamicResource AccentFillColorDefaultBrush}"
+                                BorderThickness="1.5"
+                                CornerRadius="8"
+                                IsHitTestVisible="False"
+                                Visibility="Collapsed" />
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="IsMouseOver" Value="True" />
+                                <Condition Property="IsChecked" Value="False" />
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="CardSurface" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                        </MultiTrigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="CardSurface" Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
+                            <Setter TargetName="SelectedAccentRing" Property="Visibility" Value="Visible" />
+                            <Setter TargetName="RadioOuter" Property="Fill" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                            <Setter TargetName="RadioOuter" Property="Stroke" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                            <Setter TargetName="RadioInner" Property="Visibility" Value="Visible" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Segmented Pill Selector (Theme & Language Options) -->
+    <Style x:Key="SegmentedOptionRadioStyle" TargetType="RadioButton">
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Padding" Value="14,6" />
+        <Setter Property="MinWidth" Value="74" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border x:Name="SegmentBorder"
+                            CornerRadius="5"
+                            Padding="{TemplateBinding Padding}"
+                            Background="{DynamicResource SubtleFillColorTransparentBrush}">
+                        <ContentPresenter HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"
+                                          RecognizesAccessKey="True" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="IsMouseOver" Value="True" />
+                                <Condition Property="IsChecked" Value="False" />
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="SegmentBorder" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                        </MultiTrigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="SegmentBorder" Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                            <Setter Property="Foreground" Value="{DynamicResource TextOnAccentFillColorPrimaryBrush}" />
+                            <Setter Property="FontWeight" Value="{Binding Source={x:Static loc:AppStrings.Current}, Path=StrongFontWeight}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Acrylic Interactive Guidance Button (Vertical Golden-Ratio Hero Tile Cards) -->
+    <Style x:Key="AcrylicGuidanceButtonStyle" TargetType="Button">
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Padding" Value="14,18,14,12" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Stretch" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Grid>
+                        <!-- Theme-adaptive translucent frosted backing over Hero Mask -->
+                        <Border x:Name="AcrylicBackdropFill"
+                                CornerRadius="8"
+                                Background="{DynamicResource SolidBackgroundFillColorBaseBrush}"
+                                Opacity="0.68" />
+                        <Border x:Name="AcrylicSurface"
+                                CornerRadius="8"
+                                Padding="{TemplateBinding Padding}"
+                                Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="1">
+                            <ContentPresenter />
+                        </Border>
+                        <!-- Subtle frosted specular overlay -->
+                        <Border x:Name="AcrylicTintLayer"
+                                CornerRadius="8"
+                                Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                                Opacity="0.35"
+                                IsHitTestVisible="False" />
+                        <!-- Crisp top rim highlight for glass/acrylic depth -->
+                        <Border x:Name="AcrylicTopRim"
+                                CornerRadius="8"
+                                BorderBrush="{DynamicResource ControlStrokeColorSecondaryBrush}"
+                                BorderThickness="1,1,1,0"
+                                Opacity="0.65"
+                                IsHitTestVisible="False" />
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="AcrylicBackdropFill" Property="Opacity" Value="0.84" />
+                            <Setter TargetName="AcrylicTintLayer" Property="Opacity" Value="0.72" />
+                            <Setter TargetName="AcrylicSurface" Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="AcrylicBackdropFill" Property="Opacity" Value="0.90" />
+                            <Setter TargetName="AcrylicTintLayer" Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+                            <Setter TargetName="AcrylicTintLayer" Property="Opacity" Value="0.88" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Subtle Icon/Dismiss Button -->
+    <Style x:Key="SubtleActionButtonStyle" TargetType="Button">
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Padding" Value="10,5" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+        <Setter Property="Background" Value="{DynamicResource SubtleFillColorTransparentBrush}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="BtnBorder"
+                            CornerRadius="6"
+                            Padding="{TemplateBinding Padding}"
+                            Background="{TemplateBinding Background}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="BtnBorder" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="BtnBorder" Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Fluent 2 Top-Left Window Back Button -->
+    <Style x:Key="TitleBarBackButtonStyle" TargetType="Button">
+        <Setter Property="Width" Value="36" />
+        <Setter Property="Height" Value="28" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        <Setter Property="Background" Value="{DynamicResource SubtleFillColorTransparentBrush}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="WindowChrome.IsHitTestVisibleInChrome" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="BackBorder"
+                            CornerRadius="4"
+                            Background="{TemplateBinding Background}">
+                        <TextBlock x:Name="BackGlyph"
+                                   FontFamily="{DynamicResource SymbolThemeFontFamily}"
+                                   Text="&#xE72B;"
+                                   FontSize="12"
+                                   Foreground="{TemplateBinding Foreground}"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Cursor" Value="Arrow" />
+                            <Setter TargetName="BackGlyph" Property="Opacity" Value="0.35" />
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="BackBorder" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="BackBorder" Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Borderless Icon Indicator (Voiceprint Readiness: grey CheckMark without circle background) -->
+    <Style x:Key="VoiceprintStatusIconBadgeStyle" TargetType="ContentControl">
+        <Setter Property="Width" Value="26" />
+        <Setter Property="Height" Value="26" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Cursor" Value="Help" />
+        <Setter Property="ToolTipService.InitialShowDelay" Value="120" />
+        <Setter Property="ToolTipService.ShowDuration" Value="12000" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ContentControl">
+                    <Grid Width="26"
+                          Height="26"
+                          Background="Transparent"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Center">
+                        <!-- Default Not Enrolled: Neutral Minus -->
+                        <Rectangle x:Name="EmptyDash"
+                                   Width="10"
+                                   Height="1.8"
+                                   RadiusX="0.9"
+                                   RadiusY="0.9"
+                                   Fill="{DynamicResource TextFillColorTertiaryBrush}"
+                                   Visibility="Visible" />
+
+                        <!-- Ready: Borderless Grey CheckMark -->
+                        <TextBlock x:Name="ReadyCheck"
+                                   FontFamily="{DynamicResource SymbolThemeFontFamily}"
+                                   Text="&#xE73E;"
+                                   FontSize="14"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   Visibility="Collapsed" />
+
+                        <!-- Raw Exists Waiting Cache: Muted Dots -->
+                        <StackPanel x:Name="PendingDots"
+                                    Orientation="Horizontal"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Visibility="Collapsed">
+                            <Ellipse Width="3" Height="3" Fill="{DynamicResource TextFillColorSecondaryBrush}" Margin="1,0" />
+                            <Ellipse Width="3" Height="3" Fill="{DynamicResource TextFillColorSecondaryBrush}" Margin="1,0" />
+                            <Ellipse Width="3" Height="3" Fill="{DynamicResource TextFillColorSecondaryBrush}" Margin="1,0" />
+                        </StackPanel>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <DataTrigger Binding="{Binding HasRawVoiceprint}" Value="True">
+                            <Setter TargetName="EmptyDash" Property="Visibility" Value="Collapsed" />
+                            <Setter TargetName="PendingDots" Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding HasVoiceprintCache}" Value="True">
+                            <Setter TargetName="EmptyDash" Property="Visibility" Value="Collapsed" />
+                            <Setter TargetName="PendingDots" Property="Visibility" Value="Collapsed" />
+                            <Setter TargetName="ReadyCheck" Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Capture Device ItemTemplate (clean pill badge, no parentheses) -->
+    <DataTemplate x:Key="CaptureDeviceItemTemplate" DataType="{x:Type audio:AudioDeviceInfo}">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0"
+                       Text="{Binding FriendlyName}"
+                       TextTrimming="CharacterEllipsis"
+                       VerticalAlignment="Center" />
+            <Border Grid.Column="1"
+                    Margin="8,0,0,0"
+                    Padding="6,1"
+                    CornerRadius="4"
+                    Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                    Visibility="{Binding IsDefault, Converter={StaticResource BoolToVisibilityConverter}}">
+                <TextBlock Text="{Binding Source={x:Static loc:AppStrings.Current}, Path=DeviceDefaultBadge}"
+                           FontSize="11"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            </Border>
+        </Grid>
+    </DataTemplate>
+
+    <!-- Render Device ItemTemplate (clean pill badges, no parentheses) -->
+    <DataTemplate x:Key="RenderDeviceItemTemplate" DataType="{x:Type audio:AudioDeviceInfo}">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0"
+                       Text="{Binding FriendlyName}"
+                       TextTrimming="CharacterEllipsis"
+                       VerticalAlignment="Center" />
+            <Border Grid.Column="1"
+                    Margin="8,0,0,0"
+                    Padding="6,1"
+                    CornerRadius="4"
+                    Background="{DynamicResource SystemFillColorSuccessBackgroundBrush}"
+                    Visibility="{Binding IsVirtualAudioDevice, Converter={StaticResource BoolToVisibilityConverter}}">
+                <TextBlock Text="{Binding Source={x:Static loc:AppStrings.Current}, Path=DeviceVirtualBadge}"
+                           FontSize="11"
+                           FontWeight="{Binding Source={x:Static loc:AppStrings.Current}, Path=StrongFontWeight}"
+                           Foreground="{DynamicResource SystemFillColorSuccessBrush}" />
+            </Border>
+            <Border Grid.Column="2"
+                    Margin="6,0,0,0"
+                    Padding="6,1"
+                    CornerRadius="4"
+                    Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                    Visibility="{Binding IsDefault, Converter={StaticResource BoolToVisibilityConverter}}">
+                <TextBlock Text="{Binding Source={x:Static loc:AppStrings.Current}, Path=DeviceDefaultBadge}"
+                           FontSize="11"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            </Border>
+        </Grid>
+    </DataTemplate>
+
+</ResourceDictionary>

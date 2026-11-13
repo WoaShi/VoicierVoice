@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Windows;
 using VoiceLockStudio.Services;
+using VoiceLockStudio.Services.Localization;
 using VoiceLockStudio.Services.System;
 using VoiceLockStudio.ViewModels;
 
@@ -27,6 +28,10 @@ public partial class App : Application
         }
 
         _controller = new VoiceLockController();
+        AppStrings.Current.SetLanguage(_controller.Settings.Language);
+        DwmBackdropHelper.ApplyThemePreference(_controller.Settings.ThemePreference);
+        AppStrings.Current.LanguageChanged += OnLanguageChanged;
+
         _viewModel = new MainViewModel(_controller);
         _trayIconService = new TrayIconService();
 
@@ -69,6 +74,31 @@ public partial class App : Application
         {
             _trayIconService.UpdateStatus(_viewModel.StatusBadgeText, _viewModel.IsPipelineRunning);
         }
+    }
+
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        if (_trayIconService is null)
+        {
+            return;
+        }
+
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (_trayIconService is null)
+            {
+                return;
+            }
+
+            if (_viewModel is not null)
+            {
+                _trayIconService.UpdateStatus(_viewModel.StatusBadgeText, _viewModel.IsPipelineRunning);
+            }
+            else
+            {
+                _trayIconService.UpdateLocalization();
+            }
+        });
     }
 
     private void OnMainWindowClosing(object? sender, CancelEventArgs e)
@@ -127,6 +157,8 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        AppStrings.Current.LanguageChanged -= OnLanguageChanged;
+
         if (_viewModel is not null)
         {
             _viewModel.PropertyChanged -= OnViewModelPropertyChanged;

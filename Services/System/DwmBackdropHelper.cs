@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
 using Microsoft.Win32;
+using VoiceLockStudio.Models;
 
 namespace VoiceLockStudio.Services.System;
 
@@ -22,6 +23,38 @@ public static class DwmBackdropHelper
 
     public static bool IsWindows11OrGreater => OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000);
     public static bool IsMicaSupported => OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22621);
+
+    public static AppThemePreference CurrentThemePreference { get; private set; } = AppThemePreference.System;
+
+    public static event EventHandler<AppThemePreference>? ThemeChanged;
+
+    /// <summary>
+    /// Applies the requested <see cref="AppThemePreference"/> to <see cref="Application.ThemeMode"/>
+    /// at runtime and refreshes DWM titlebar theming on all currently open windows.
+    /// </summary>
+    public static void ApplyThemePreference(AppThemePreference preference)
+    {
+        CurrentThemePreference = preference;
+
+        if (Application.Current is { } app)
+        {
+#pragma warning disable WPF0001
+            app.ThemeMode = preference switch
+            {
+                AppThemePreference.Light => ThemeMode.Light,
+                AppThemePreference.Dark => ThemeMode.Dark,
+                _ => ThemeMode.System
+            };
+#pragma warning restore WPF0001
+
+            foreach (Window window in app.Windows)
+            {
+                UpdateTitleBarTheme(window);
+            }
+        }
+
+        ThemeChanged?.Invoke(null, preference);
+    }
 
     /// <summary>
     /// Applies Mica (Win11 22H2+), rounded corners (Win11+), and immersive dark mode titlebar
@@ -102,8 +135,8 @@ public static class DwmBackdropHelper
     }
 
     /// <summary>
-    /// Determines whether dark mode is currently active according to <see cref="Application.ThemeMode"/>
-    /// or the Windows <c>AppsUseLightTheme</c> registry preference.
+    /// Determines whether dark mode is currently active according to <see cref="Application.ThemeMode"/>,
+    /// <see cref="CurrentThemePreference"/>, or the Windows <c>AppsUseLightTheme</c> registry preference.
     /// </summary>
     public static bool IsDarkThemeActive()
     {
@@ -121,6 +154,16 @@ public static class DwmBackdropHelper
                 return false;
             }
 #pragma warning restore WPF0001
+        }
+
+        if (CurrentThemePreference == AppThemePreference.Dark)
+        {
+            return true;
+        }
+
+        if (CurrentThemePreference == AppThemePreference.Light)
+        {
+            return false;
         }
 
         try

@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Threading;
@@ -7,9 +8,26 @@ using CommunityToolkit.Mvvm.Input;
 using VoiceLockStudio.Models;
 using VoiceLockStudio.Services;
 using VoiceLockStudio.Services.Audio;
+using VoiceLockStudio.Services.Localization;
 using VoiceLockStudio.Services.System;
 
 namespace VoiceLockStudio.ViewModels;
+
+public enum NavigationTab
+{
+    Pipeline,
+    Voiceprint,
+    Compute,
+    OtherSettings
+}
+
+public enum GuidanceTarget
+{
+    None,
+    AudioRouting,
+    VoiceprintCapture,
+    MasterSwitch
+}
 
 public enum PipelineStatusKind
 {
@@ -17,6 +35,19 @@ public enum PipelineStatusKind
     Running,
     Sleeping,
     Faulted
+}
+
+internal enum RecordingMessageKind
+{
+    Idle,
+    Stopping,
+    Completed,
+    Canceled,
+    Rebuilding,
+    Rebuilt,
+    RecordingFailed,
+    PlaybackFailed,
+    RebuildFailed
 }
 
 public sealed partial class CpuCoreItemViewModel : ObservableObject
@@ -29,35 +60,44 @@ public sealed partial class CpuCoreItemViewModel : ObservableObject
         IsEfficiencyCore = core.IsEfficiencyCore;
         IsRecommended = core.IsRecommended;
         BitMask = core.LogicalProcessorMask;
-
-        string shortRole = core.IsEfficiencyCore
-            ? "E-Core"
-            : (core.IsRecommended ? "Tail" : "P-Core");
-
-        CoreTypeLabel = shortRole;
-        Label = $"C{core.CoreIndex} · {(core.IsEfficiencyCore ? "E" : "P")}";
+        Label = $"C{core.CoreIndex} {(core.IsEfficiencyCore ? "E" : "P")}";
         TooltipText = core.DisplayName;
+        _coreTypeLabel = ResolveRoleLabel(core.IsEfficiencyCore, core.IsRecommended);
     }
 
     public int LogicalIndex { get; }
     public int PhysicalIndex { get; }
     public ushort ProcessorGroup { get; }
     public string Label { get; }
-    public string CoreTypeLabel { get; }
     public bool IsEfficiencyCore { get; }
     public bool IsRecommended { get; }
     public ulong BitMask { get; }
     public string TooltipText { get; }
 
     [ObservableProperty]
+    private string _coreTypeLabel;
+
+    [ObservableProperty]
     private bool _isSelected;
+
+    public void RefreshLocalization()
+    {
+        CoreTypeLabel = ResolveRoleLabel(IsEfficiencyCore, IsRecommended);
+    }
+
+    private static string ResolveRoleLabel(bool isEfficiency, bool isRecommended)
+    {
+        if (isEfficiency)
+        {
+            return AppStrings.Current.CoreRoleEfficiency;
+        }
+
+        return isRecommended ? AppStrings.Current.CoreRoleTail : AppStrings.Current.CoreRolePerformance;
+    }
 }
 
 public sealed partial class MainViewModel : ObservableObject, IDisposable
 {
-    private const string DefaultPromptText =
-        "今天天气真不错，我正在使用 VoiceLock Studio 录制个人声纹样本，用于在嘈杂环境中精准提取我的声音。";
-
     private readonly VoiceLockController _controller;
     private readonly Dispatcher _dispatcher;
 
@@ -66,7 +106,29 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private bool _updatingBackendFlags;
     private bool _disposed;
 
-    // Card 1: Status & Telemetry
+    private TelemetrySnapshot? _latestSnapshot;
+    private string? _latestActiveCoreRawDescription;
+    private string? _lastStatusError;
+    private RecordingMessageKind _recordingMessageKind = RecordingMessageKind.Idle;
+    private double _lastCompletedDurationSeconds;
+    private string? _lastRecordingError;
+
+    // Navigation & Guidance
+    private readonly Stack<NavigationTab> _navigationHistory = new();
+    private NavigationTab _lastRecordedTab = NavigationTab.Pipeline;
+    private bool _isNavigatingBack;
+
+    [ObservableProperty]
+    private NavigationTab _activeTab = NavigationTab.Pipeline;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(NavigateBackCommand))]
+    private bool _canNavigateBack;
+
+    [ObservableProperty]
+    private bool _showQuickStartGuide = true;
+
+    // Status & Telemetry
     [ObservableProperty]
     private bool _isPipelineRunning;
 
@@ -74,7 +136,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private bool _isBusy;
 
     [ObservableProperty]
-    private string _statusBadgeText = "已停止";
+    private string _statusBadgeText = string.Empty;
 
     [ObservableProperty]
     private PipelineStatusKind _statusKind = PipelineStatusKind.Idle;
@@ -86,7 +148,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private string _telemetryInferenceText = "--";
 
     [ObservableProperty]
-    private string _telemetryCoreText = "未绑定";
+    private string _telemetryCoreText = string.Empty;
 
     [ObservableProperty]
     private double _inputLevelPercent;
@@ -95,11 +157,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private double _outputLevelPercent;
 
     [ObservableProperty]
-    private string _backendStatusBanner = "CPU (Single-Thread Lock-Core)";
+    private string _backendStatusBanner = string.Empty;
 
-    // Card 2: Voiceprint Profile
+    // Voiceprint Profile
     [ObservableProperty]
-    private string _promptReadText = DefaultPromptText;
+    private string _promptReadText = string.Empty;
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(RebuildCacheCommand))]
@@ -113,7 +175,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private double _recordingLevel;
 
     [ObservableProperty]
-    private string _recordingStatusText = "点击按钮朗读上方文本 5 秒以录入声纹";
+    private string _recordingStatusText = string.Empty;
 
     [ObservableProperty]
     private bool _isPlayingSample;
@@ -127,12 +189,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private bool _hasVoiceprintCache;
 
     [ObservableProperty]
-    private string _voiceprintStatusText = "尚未录入声纹（VoxLock 将直通音频）";
+    private string _voiceprintStatusText = string.Empty;
 
     [ObservableProperty]
-    private string _voiceprintDetailText = "请先录制 5 秒个人人声样本";
+    private string _voiceprintDetailText = string.Empty;
 
-    // Card 3: Audio Routing & Cascade DSP
+    // Audio Routing & Cascade DSP
     [ObservableProperty]
     private AudioDeviceInfo? _selectedCaptureDevice;
 
@@ -163,7 +225,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private VoxLockModelVariant _selectedVoxLockVariant = VoxLockModelVariant.Int8;
 
-    // Card 4: Compute & Core Affinity
+    // Compute & Core Affinity
     [ObservableProperty]
     private ComputeBackend _selectedComputeBackend = ComputeBackend.Cpu;
 
@@ -180,7 +242,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private bool _hasCudaFallbackNotice;
 
     [ObservableProperty]
-    private string _cpuTopologySummary = "正在检测 CPU 拓扑...";
+    private string _cpuTopologySummary = string.Empty;
 
     [ObservableProperty]
     private bool _autoAffinityEnabled = true;
@@ -188,9 +250,18 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _isCoreMatrixExpanded;
 
-    // Tray & Lifecycle
+    // Preferences & About
+    [ObservableProperty]
+    private AppLanguage _selectedLanguage = AppLanguage.ZhCn;
+
+    [ObservableProperty]
+    private AppThemePreference _selectedThemePreference = AppThemePreference.System;
+
     [ObservableProperty]
     private bool _minimizeToTrayEnabled = true;
+
+    [ObservableProperty]
+    private bool _isDarkThemeActive;
 
     public MainViewModel()
         : this(new VoiceLockController())
@@ -209,9 +280,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _controller.VoiceprintChanged += OnControllerVoiceprintChanged;
         _controller.BackendStateChanged += OnControllerBackendStateChanged;
 
+        AppStrings.Current.LanguageChanged += OnAppLanguageChanged;
+        DwmBackdropHelper.ThemeChanged += OnDwmThemeChanged;
+
         HydrateFromSettingsAndTopology();
         RefreshDevices();
-        RefreshVoiceprintStatus();
+        RefreshLocalizedTexts();
     }
 
     public ObservableCollection<AudioDeviceInfo> CaptureDevices { get; } = [];
@@ -225,8 +299,39 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         VoxLockModelVariant.Fp16
     ];
 
+    public string AppDataDirectoryPath => AppSettings.GetAppDataDirectory();
+
+    public string ActiveTabTitle => ActiveTab switch
+    {
+        NavigationTab.Voiceprint => AppStrings.Current.NavVoiceprintTitle,
+        NavigationTab.Compute => AppStrings.Current.NavComputeTitle,
+        NavigationTab.OtherSettings => AppStrings.Current.NavOtherTitle,
+        _ => AppStrings.Current.NavPipelineTitle
+    };
+
+    public string AboutCardTitle => AppStrings.Current.Language == AppLanguage.EnUs
+        ? "About & Data"
+        : "关于与本地数据";
+
+    public string OpenFolderButtonText => AppStrings.Current.Language == AppLanguage.EnUs
+        ? "Open Folder"
+        : "打开目录";
+
+    public string ResetQuickStartButtonText => AppStrings.Current.Language == AppLanguage.EnUs
+        ? "Show Quick Start Guide"
+        : "重新显示快速上手引导";
+
+    public string TelemetryStripTitle => AppStrings.Current.Language == AppLanguage.EnUs
+        ? "Audio Signal Levels"
+        : "实时音频电平";
+
+    public string VadLiveProbPrefix => AppStrings.Current.Language == AppLanguage.EnUs
+        ? "Speech Prob"
+        : "实时概率";
+
     public event EventHandler? ShowWindowRequested;
     public event EventHandler? ExitRequested;
+    public event EventHandler<GuidanceTarget>? GuidanceRequested;
 
     public async Task InitializeAsync()
     {
@@ -245,12 +350,25 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             StatusKind = PipelineStatusKind.Faulted;
-            StatusBadgeText = $"初始化失败 · {ex.Message}";
+            _lastStatusError = ex.Message;
+            StatusBadgeText = AppStrings.Current.FormatInitFailed(ex.Message);
         }
         finally
         {
             IsBusy = false;
         }
+    }
+
+    partial void OnActiveTabChanged(NavigationTab value)
+    {
+        if (!_isNavigatingBack && value != _lastRecordedTab)
+        {
+            _navigationHistory.Push(_lastRecordedTab);
+            CanNavigateBack = _navigationHistory.Count > 0;
+        }
+
+        _lastRecordedTab = value;
+        OnPropertyChanged(nameof(ActiveTabTitle));
     }
 
     partial void OnIsPipelineRunningChanged(bool value)
@@ -438,6 +556,176 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    partial void OnSelectedLanguageChanged(AppLanguage value)
+    {
+        if (_isHydrating)
+        {
+            return;
+        }
+
+        AppStrings.Current.SetLanguage(value);
+        _controller.UpdateAppPreferences(value, SelectedThemePreference, MinimizeToTrayEnabled);
+    }
+
+    partial void OnSelectedThemePreferenceChanged(AppThemePreference value)
+    {
+        if (_isHydrating)
+        {
+            return;
+        }
+
+        DwmBackdropHelper.ApplyThemePreference(value);
+        _controller.UpdateAppPreferences(SelectedLanguage, value, MinimizeToTrayEnabled);
+    }
+
+    partial void OnMinimizeToTrayEnabledChanged(bool value)
+    {
+        if (_isHydrating)
+        {
+            return;
+        }
+
+        _controller.UpdateAppPreferences(SelectedLanguage, SelectedThemePreference, value);
+    }
+
+    [RelayCommand]
+    private void NavigateToTab(NavigationTab tab)
+    {
+        ActiveTab = tab;
+    }
+
+    [RelayCommand]
+    private void NavigateGuidance(GuidanceTarget target)
+    {
+        switch (target)
+        {
+            case GuidanceTarget.AudioRouting:
+            case GuidanceTarget.MasterSwitch:
+                ActiveTab = NavigationTab.Pipeline;
+                break;
+
+            case GuidanceTarget.VoiceprintCapture:
+                ActiveTab = NavigationTab.Voiceprint;
+                break;
+        }
+
+        _dispatcher.BeginInvoke(
+            DispatcherPriority.Loaded,
+            () => GuidanceRequested?.Invoke(this, target));
+    }
+
+    [RelayCommand]
+    private void OpenVoiceprintTab()
+    {
+        NavigateGuidance(GuidanceTarget.VoiceprintCapture);
+    }
+
+    [RelayCommand]
+    private void DismissQuickStart()
+    {
+        ShowQuickStartGuide = false;
+    }
+
+    [RelayCommand]
+    private void ResetQuickStart()
+    {
+        ShowQuickStartGuide = true;
+        ActiveTab = NavigationTab.Pipeline;
+    }
+
+    [RelayCommand(CanExecute = nameof(CanNavigateBack))]
+    private void NavigateBack()
+    {
+        if (_navigationHistory.Count == 0)
+        {
+            return;
+        }
+
+        NavigationTab previous = _navigationHistory.Pop();
+        CanNavigateBack = _navigationHistory.Count > 0;
+        _isNavigatingBack = true;
+        try
+        {
+            ActiveTab = previous;
+        }
+        finally
+        {
+            _isNavigatingBack = false;
+        }
+    }
+
+    [RelayCommand]
+    private void OpenVoiceprintFolder()
+    {
+        try
+        {
+            string? rawPath = _controller.ResolveExistingVoiceprintWavPath();
+            if (!string.IsNullOrWhiteSpace(rawPath) && File.Exists(rawPath))
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = $"/select,\"{rawPath}\"",
+                    UseShellExecute = true
+                });
+                return;
+            }
+
+            Directory.CreateDirectory(AppDataDirectoryPath);
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = AppDataDirectoryPath,
+                UseShellExecute = true
+            });
+        }
+        catch
+        {
+            // Ignore shell launch failures in restricted environments.
+        }
+    }
+
+    [RelayCommand]
+    private void OpenAppDataFolder()
+    {
+        try
+        {
+            Directory.CreateDirectory(AppDataDirectoryPath);
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = AppDataDirectoryPath,
+                UseShellExecute = true
+            });
+        }
+        catch
+        {
+            // Ignore shell launch failures in restricted environments.
+        }
+    }
+
+    [RelayCommand]
+    private void OpenExternalUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url) ||
+            !Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) ||
+            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = uri.AbsoluteUri,
+                UseShellExecute = true
+            });
+        }
+        catch
+        {
+            // Ignore shell launch failures in restricted environments.
+        }
+    }
+
     [RelayCommand]
     private async Task TogglePipelineAsync()
     {
@@ -490,32 +778,39 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (IsRecording)
         {
             _controller.StopVoiceprintRecording();
-            RecordingStatusText = "正在停止录制...";
+            _recordingMessageKind = RecordingMessageKind.Stopping;
+            RecordingStatusText = AppStrings.Current.RecordingStoppingStatus;
             return;
         }
 
         IsRecording = true;
         RecordingProgress = 0;
         RecordingLevel = 0;
-        RecordingStatusText = "正在录制声纹样本 (5.0 秒)...";
+        _recordingMessageKind = RecordingMessageKind.Idle;
+        RecordingStatusText = AppStrings.Current.RecordingActiveDefaultStatus;
 
         try
         {
             VoiceprintProfileInfo profile = await _controller.RecordAndEnrollVoiceprintAsync(5.0);
             RecordingProgress = 100;
             RecordingLevel = 0;
-            RecordingStatusText = $"录制并建模完成 ({profile.SourceDurationSeconds:0.0} 秒)";
+            _lastCompletedDurationSeconds = profile.SourceDurationSeconds;
+            _recordingMessageKind = RecordingMessageKind.Completed;
+            RecordingStatusText = AppStrings.Current.FormatRecordingCompleted(profile.SourceDurationSeconds);
             RefreshVoiceprintStatus();
         }
         catch (OperationCanceledException)
         {
-            RecordingStatusText = "声纹录制已取消";
+            _recordingMessageKind = RecordingMessageKind.Canceled;
+            RecordingStatusText = AppStrings.Current.RecordingCanceledStatus;
             RecordingProgress = 0;
             RecordingLevel = 0;
         }
         catch (Exception ex)
         {
-            RecordingStatusText = $"录制失败: {ex.Message}";
+            _lastRecordingError = ex.Message;
+            _recordingMessageKind = RecordingMessageKind.RecordingFailed;
+            RecordingStatusText = AppStrings.Current.FormatRecordingFailed(ex.Message);
             RecordingProgress = 0;
             RecordingLevel = 0;
         }
@@ -545,7 +840,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             IsPlayingSample = false;
-            RecordingStatusText = $"试听失败: {ex.Message}";
+            _lastRecordingError = ex.Message;
+            _recordingMessageKind = RecordingMessageKind.PlaybackFailed;
+            RecordingStatusText = AppStrings.Current.FormatPlaybackFailed(ex.Message);
         }
     }
 
@@ -555,16 +852,20 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private async Task RebuildCacheAsync()
     {
         IsBusy = true;
-        RecordingStatusText = "正在重建声纹模型缓存...";
+        _recordingMessageKind = RecordingMessageKind.Rebuilding;
+        RecordingStatusText = AppStrings.Current.RebuildingCacheStatus;
         try
         {
             await _controller.RebuildVoiceprintCacheAsync(forceRebuild: true);
             RefreshVoiceprintStatus();
-            RecordingStatusText = "声纹缓存重建完成";
+            _recordingMessageKind = RecordingMessageKind.Rebuilt;
+            RecordingStatusText = AppStrings.Current.RebuildCacheDoneStatus;
         }
         catch (Exception ex)
         {
-            RecordingStatusText = $"重建缓存失败: {ex.Message}";
+            _lastRecordingError = ex.Message;
+            _recordingMessageKind = RecordingMessageKind.RebuildFailed;
+            RecordingStatusText = AppStrings.Current.FormatRebuildFailed(ex.Message);
         }
         finally
         {
@@ -617,7 +918,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             if (shouldRun)
             {
-                StatusBadgeText = "正在启动音频管线...";
+                StatusBadgeText = AppStrings.Current.StatusStarting;
                 await _controller.StartPipelineAsync();
             }
             else
@@ -629,7 +930,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             SetPipelineRunningFlagFromTelemetry(false);
             StatusKind = PipelineStatusKind.Faulted;
-            StatusBadgeText = $"启动失败 · {ex.Message}";
+            _lastStatusError = ex.Message;
+            StatusBadgeText = AppStrings.Current.FormatStatusFaulted(ex.Message);
         }
         finally
         {
@@ -649,7 +951,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             StatusKind = PipelineStatusKind.Faulted;
-            StatusBadgeText = $"设备切换失败 · {ex.Message}";
+            _lastStatusError = ex.Message;
+            StatusBadgeText = AppStrings.Current.FormatDeviceSwitchFailed(ex.Message);
         }
     }
 
@@ -664,7 +967,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            CudaFallbackNotice = $"模型/后端切换失败: {ex.Message}";
+            CudaFallbackNotice = AppStrings.Current.FormatSwitchFailed(ex.Message);
             HasCudaFallbackNotice = true;
         }
         finally
@@ -703,9 +1006,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
             AutoAffinityEnabled = settings.AutoAffinityEnabled;
 
+            SelectedLanguage = settings.Language;
+            SelectedThemePreference = settings.ThemePreference;
+            MinimizeToTrayEnabled = settings.MinimizeToTrayEnabled;
+            IsDarkThemeActive = DwmBackdropHelper.IsDarkThemeActive();
+
             CpuTopologyInfo topology = _controller.CpuTopology;
             BuildCpuTopologyUi(topology, settings);
-            TelemetryCoreText = FormatShortCoreDescription(topology.RecommendedDescription, topology);
+            _latestActiveCoreRawDescription = topology.RecommendedDescription;
         }
         finally
         {
@@ -716,16 +1024,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private void BuildCpuTopologyUi(CpuTopologyInfo topology, AppSettings settings)
     {
-        if (topology.IsHeterogeneous)
-        {
-            int pCores = topology.PhysicalCores.Count(c => !c.IsEfficiencyCore);
-            int eCores = topology.PhysicalCores.Count(c => c.IsEfficiencyCore);
-            CpuTopologySummary = $"{topology.TotalLogicalProcessors} 逻辑核心 ({pCores} P-Core + {eCores} E-Core) · 推荐自动锁定能效核";
-        }
-        else
-        {
-            CpuTopologySummary = $"{topology.TotalLogicalProcessors} 逻辑核心 ({topology.PhysicalCores.Count} 物理核心) · 推荐锁定尾核";
-        }
+        CpuTopologySummary = AppStrings.Current.FormatCpuTopologySummary(topology);
 
         CoreMatrixItems.Clear();
         ulong activeMask = settings.AutoAffinityEnabled || settings.SelectedCoreMask == 0
@@ -783,9 +1082,22 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private void RefreshBackendBanner()
     {
-        BackendStatusBanner = _controller.ActiveProviderSummary;
-        CudaFallbackNotice = _controller.ProviderFallbackWarning;
-        HasCudaFallbackNotice = !string.IsNullOrWhiteSpace(CudaFallbackNotice);
+        BackendStatusBanner = AppStrings.Current.FormatBackendBanner(
+            _controller.Settings.ComputeBackend,
+            _controller.IsCudaFallbackActive);
+
+        if (_controller.IsCudaFallbackActive)
+        {
+            CudaFallbackNotice = string.IsNullOrWhiteSpace(_controller.ProviderFallbackWarning)
+                ? AppStrings.Current.FormatCudaFallbackDefault()
+                : _controller.ProviderFallbackWarning;
+            HasCudaFallbackNotice = true;
+        }
+        else
+        {
+            CudaFallbackNotice = null;
+            HasCudaFallbackNotice = false;
+        }
     }
 
     private void RefreshVoiceprintStatus()
@@ -799,21 +1111,102 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (HasVoiceprintCache && profile is not null)
         {
             VoiceprintStatusText = profile.LoadedFromCache
-                ? "声纹已就绪 · 已加载本地特征缓存"
-                : "声纹已就绪 · 已提取最新特征";
+                ? AppStrings.Current.VoiceprintReadyCached
+                : AppStrings.Current.VoiceprintReadyFresh;
             string fileName = Path.GetFileName(profile.SourceWavPath);
-            VoiceprintDetailText = $"{fileName} ({profile.SourceDurationSeconds:0.0}s) · 变体 {SelectedVoxLockVariant}";
+            VoiceprintDetailText = AppStrings.Current.FormatVoiceprintDetail(
+                fileName,
+                profile.SourceDurationSeconds,
+                SelectedVoxLockVariant);
         }
         else if (HasRawVoiceprint)
         {
-            VoiceprintStatusText = "发现原始声纹样本，正在等待或可重建模型缓存";
+            VoiceprintStatusText = AppStrings.Current.VoiceprintWaitingRebuild;
             VoiceprintDetailText = Path.GetFileName(rawPath)!;
         }
         else
         {
-            VoiceprintStatusText = "尚未录入声纹（VoxLock 将直通音频）";
-            VoiceprintDetailText = "请朗读上方提示语并点击「录制我的声纹」";
+            VoiceprintStatusText = AppStrings.Current.VoiceprintNotEnrolled;
+            VoiceprintDetailText = AppStrings.Current.VoiceprintPromptDetail;
         }
+    }
+
+    private void RefreshLocalizedTexts()
+    {
+        OnPropertyChanged(nameof(ActiveTabTitle));
+        OnPropertyChanged(nameof(AboutCardTitle));
+        OnPropertyChanged(nameof(OpenFolderButtonText));
+        OnPropertyChanged(nameof(ResetQuickStartButtonText));
+        OnPropertyChanged(nameof(TelemetryStripTitle));
+        OnPropertyChanged(nameof(VadLiveProbPrefix));
+
+        PromptReadText = AppStrings.Current.VoiceprintPromptText;
+
+        CpuTopologyInfo topology = _controller.CpuTopology;
+        CpuTopologySummary = AppStrings.Current.FormatCpuTopologySummary(topology);
+        TelemetryCoreText = AppStrings.Current.FormatShortCoreDescription(
+            _latestActiveCoreRawDescription ?? topology.RecommendedDescription,
+            topology);
+
+        foreach (CpuCoreItemViewModel core in CoreMatrixItems)
+        {
+            core.RefreshLocalization();
+        }
+
+        RefreshBackendBanner();
+        RefreshVoiceprintStatus();
+        RefreshStatusFromSnapshot();
+        RefreshRecordingStatusText();
+        NotifyVariantLabelsRefreshed();
+    }
+
+    private void RefreshStatusFromSnapshot()
+    {
+        if (_latestSnapshot is { } snapshot)
+        {
+            ApplyTelemetrySnapshot(snapshot);
+            return;
+        }
+
+        if (StatusKind == PipelineStatusKind.Faulted && !string.IsNullOrWhiteSpace(_lastStatusError))
+        {
+            StatusBadgeText = AppStrings.Current.FormatStatusFaulted(_lastStatusError);
+            return;
+        }
+
+        StatusKind = PipelineStatusKind.Idle;
+        StatusBadgeText = AppStrings.Current.StatusStopped;
+    }
+
+    private void RefreshRecordingStatusText()
+    {
+        if (IsRecording)
+        {
+            RecordingStatusText = AppStrings.Current.RecordingActiveDefaultStatus;
+            return;
+        }
+
+        RecordingStatusText = _recordingMessageKind switch
+        {
+            RecordingMessageKind.Stopping => AppStrings.Current.RecordingStoppingStatus,
+            RecordingMessageKind.Completed => AppStrings.Current.FormatRecordingCompleted(_lastCompletedDurationSeconds),
+            RecordingMessageKind.Canceled => AppStrings.Current.RecordingCanceledStatus,
+            RecordingMessageKind.Rebuilding => AppStrings.Current.RebuildingCacheStatus,
+            RecordingMessageKind.Rebuilt => AppStrings.Current.RebuildCacheDoneStatus,
+            RecordingMessageKind.RecordingFailed when !string.IsNullOrEmpty(_lastRecordingError) =>
+                AppStrings.Current.FormatRecordingFailed(_lastRecordingError),
+            RecordingMessageKind.PlaybackFailed when !string.IsNullOrEmpty(_lastRecordingError) =>
+                AppStrings.Current.FormatPlaybackFailed(_lastRecordingError),
+            RecordingMessageKind.RebuildFailed when !string.IsNullOrEmpty(_lastRecordingError) =>
+                AppStrings.Current.FormatRebuildFailed(_lastRecordingError),
+            _ => AppStrings.Current.RecordingIdleStatus
+        };
+    }
+
+    private void NotifyVariantLabelsRefreshed()
+    {
+        OnPropertyChanged(nameof(VoxLockVariants));
+        OnPropertyChanged(nameof(SelectedVoxLockVariant));
     }
 
     private void SetPipelineRunningFlagFromTelemetry(bool running)
@@ -834,6 +1227,121 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    private void ApplyTelemetrySnapshot(TelemetrySnapshot snapshot)
+    {
+        switch (snapshot.State)
+        {
+            case PipelineRunState.Running:
+                SetPipelineRunningFlagFromTelemetry(true);
+                if (VadEnabled && !snapshot.VadSpeechActive)
+                {
+                    StatusKind = PipelineStatusKind.Sleeping;
+                    StatusBadgeText = AppStrings.Current.StatusSleeping;
+                }
+                else
+                {
+                    StatusKind = PipelineStatusKind.Running;
+                    StatusBadgeText = AppStrings.Current.StatusRunning;
+                }
+
+                TelemetryLatencyText = $"~{Math.Round(snapshot.LatencyMs):0} ms";
+                TelemetryInferenceText = $"{snapshot.FrameInferenceMs:0.0} ms";
+                _latestActiveCoreRawDescription = snapshot.ActiveCoreDescription;
+                TelemetryCoreText = AppStrings.Current.FormatShortCoreDescription(
+                    snapshot.ActiveCoreDescription,
+                    _controller.CpuTopology);
+                InputLevelPercent = RmsToMeterPercent(snapshot.InputRms);
+                OutputLevelPercent = RmsToMeterPercent(snapshot.OutputRms);
+                VadLiveProbText = AppStrings.Current.FormatVadLiveProb(
+                    snapshot.VadProbability,
+                    snapshot.VadSpeechActive,
+                    VadEnabled);
+                break;
+
+            case PipelineRunState.Starting:
+                StatusKind = PipelineStatusKind.Idle;
+                StatusBadgeText = AppStrings.Current.StatusStarting;
+                break;
+
+            case PipelineRunState.Faulted:
+                SetPipelineRunningFlagFromTelemetry(false);
+                StatusKind = PipelineStatusKind.Faulted;
+                _lastStatusError = snapshot.StatusText;
+                StatusBadgeText = string.IsNullOrWhiteSpace(snapshot.StatusText)
+                    ? AppStrings.Current.StatusFaultedPrefix
+                    : snapshot.StatusText;
+                InputLevelPercent = 0;
+                OutputLevelPercent = 0;
+                VadLiveProbText = "--";
+                break;
+
+            default:
+                SetPipelineRunningFlagFromTelemetry(false);
+                StatusKind = PipelineStatusKind.Idle;
+                StatusBadgeText = AppStrings.Current.StatusStopped;
+                TelemetryLatencyText = "--";
+                TelemetryInferenceText = "--";
+                InputLevelPercent = 0;
+                OutputLevelPercent = 0;
+                VadLiveProbText = "--";
+                break;
+        }
+    }
+
+    private void OnAppLanguageChanged(object? sender, EventArgs e)
+    {
+        BeginInvokeOnUi(() =>
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            if (SelectedLanguage != AppStrings.Current.Language)
+            {
+                bool prev = _isHydrating;
+                _isHydrating = true;
+                try
+                {
+                    SelectedLanguage = AppStrings.Current.Language;
+                }
+                finally
+                {
+                    _isHydrating = prev;
+                }
+            }
+
+            RefreshLocalizedTexts();
+        });
+    }
+
+    private void OnDwmThemeChanged(object? sender, AppThemePreference preference)
+    {
+        BeginInvokeOnUi(() =>
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            if (SelectedThemePreference != preference)
+            {
+                bool prev = _isHydrating;
+                _isHydrating = true;
+                try
+                {
+                    SelectedThemePreference = preference;
+                }
+                finally
+                {
+                    _isHydrating = prev;
+                }
+            }
+
+            IsDarkThemeActive = DwmBackdropHelper.IsDarkThemeActive();
+        });
+    }
+
     private void OnControllerTelemetryUpdated(object? sender, TelemetrySnapshot snapshot)
     {
         BeginInvokeOnUi(() =>
@@ -843,61 +1351,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            switch (snapshot.State)
-            {
-                case PipelineRunState.Running:
-                    SetPipelineRunningFlagFromTelemetry(true);
-                    if (VadEnabled && !snapshot.VadSpeechActive)
-                    {
-                        StatusKind = PipelineStatusKind.Sleeping;
-                        StatusBadgeText = "静音休眠中 · 0% 算力占用";
-                    }
-                    else
-                    {
-                        StatusKind = PipelineStatusKind.Running;
-                        StatusBadgeText = "运行中 · 正在过滤人声";
-                    }
-
-                    TelemetryLatencyText = $"~{Math.Round(snapshot.LatencyMs):0} ms";
-                    TelemetryInferenceText = $"{snapshot.FrameInferenceMs:0.0} ms";
-                    TelemetryCoreText = FormatShortCoreDescription(snapshot.ActiveCoreDescription, _controller.CpuTopology);
-                    InputLevelPercent = RmsToMeterPercent(snapshot.InputRms);
-                    OutputLevelPercent = RmsToMeterPercent(snapshot.OutputRms);
-                    VadLiveProbText = VadEnabled
-                        ? $"{snapshot.VadProbability:0.00} · {(snapshot.VadSpeechActive ? "人声" : "静音")}"
-                        : "已旁路";
-                    break;
-
-                case PipelineRunState.Starting:
-                    StatusKind = PipelineStatusKind.Idle;
-                    StatusBadgeText = "正在启动音频管线...";
-                    break;
-
-                case PipelineRunState.Faulted:
-                    SetPipelineRunningFlagFromTelemetry(false);
-                    StatusKind = PipelineStatusKind.Faulted;
-                    StatusBadgeText = snapshot.StatusText;
-                    InputLevelPercent = 0;
-                    OutputLevelPercent = 0;
-                    VadLiveProbText = "--";
-                    break;
-
-                default:
-                    SetPipelineRunningFlagFromTelemetry(false);
-                    StatusKind = PipelineStatusKind.Idle;
-                    StatusBadgeText = "已停止";
-                    TelemetryLatencyText = "--";
-                    TelemetryInferenceText = "--";
-                    InputLevelPercent = 0;
-                    OutputLevelPercent = 0;
-                    VadLiveProbText = "--";
-                    break;
-            }
-
-            if (!string.IsNullOrWhiteSpace(snapshot.ActiveBackendDescription))
-            {
-                BackendStatusBanner = snapshot.ActiveBackendDescription;
-            }
+            _latestSnapshot = snapshot;
+            ApplyTelemetrySnapshot(snapshot);
         });
     }
 
@@ -912,7 +1367,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
             SetPipelineRunningFlagFromTelemetry(false);
             StatusKind = PipelineStatusKind.Faulted;
-            StatusBadgeText = $"管线异常 · {ex.Message}";
+            _lastStatusError = ex.Message;
+            StatusBadgeText = AppStrings.Current.FormatStatusFaulted(ex.Message);
             InputLevelPercent = 0;
             OutputLevelPercent = 0;
         });
@@ -931,7 +1387,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             RecordingLevel = RmsToMeterPercent(progress.RmsLevel);
             if (progress.IsRecording)
             {
-                RecordingStatusText = $"正在录制声纹... {progress.ElapsedSeconds:0.0} / {progress.TotalSeconds:0.0} 秒";
+                RecordingStatusText = AppStrings.Current.FormatRecordingProgress(
+                    progress.ElapsedSeconds,
+                    progress.TotalSeconds);
             }
         });
     }
@@ -992,33 +1450,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         return Math.Clamp((db + 60.0) / 57.0 * 100.0, 0.0, 100.0);
     }
 
-    private static string FormatShortCoreDescription(string rawDescription, CpuTopologyInfo topology)
-    {
-        if (string.IsNullOrWhiteSpace(rawDescription))
-        {
-            return "未绑定";
-        }
-
-        if (rawDescription.StartsWith("Auto E-Cores", StringComparison.OrdinalIgnoreCase))
-        {
-            int eCoreCount = topology.PhysicalCores.Count(c => c.IsEfficiencyCore);
-            return $"自动锁定 E-Core ({eCoreCount}核)";
-        }
-
-        if (rawDescription.StartsWith("Auto Tail Cores", StringComparison.OrdinalIgnoreCase))
-        {
-            return "自动锁定尾核 (Tail)";
-        }
-
-        if (rawDescription.Length > 28)
-        {
-            int parenIdx = rawDescription.IndexOf('(');
-            return parenIdx > 0 ? rawDescription[..parenIdx].Trim() : rawDescription[..28];
-        }
-
-        return rawDescription;
-    }
-
     public void Dispose()
     {
         if (_disposed)
@@ -1027,6 +1458,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         _disposed = true;
+        AppStrings.Current.LanguageChanged -= OnAppLanguageChanged;
+        DwmBackdropHelper.ThemeChanged -= OnDwmThemeChanged;
+
         _controller.TelemetryUpdated -= OnControllerTelemetryUpdated;
         _controller.PipelineFaulted -= OnControllerPipelineFaulted;
         _controller.RecordingProgress -= OnControllerRecordingProgress;

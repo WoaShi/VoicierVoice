@@ -177,12 +177,50 @@ public sealed class AudioDeviceService
         return list;
     }
 
-    private static bool IsVirtualEndpoint(string friendlyName, string deviceDescription)
+    internal static bool IsVirtualEndpoint(string friendlyName, string deviceDescription)
     {
-        return friendlyName.Contains("CABLE Input", StringComparison.OrdinalIgnoreCase)
-            || friendlyName.Contains("Virtual", StringComparison.OrdinalIgnoreCase)
-            || deviceDescription.Contains("CABLE Input", StringComparison.OrdinalIgnoreCase)
-            || deviceDescription.Contains("Virtual", StringComparison.OrdinalIgnoreCase);
+        return ContainsAnyOrdinalIgnoreCase(
+                friendlyName,
+                "CABLE Input",
+                "CABLE-A",
+                "CABLE-B",
+                "CABLE-C",
+                "CABLE-D",
+                "Hi-Fi Cable",
+                "VoiceMeeter",
+                "VAIO3",
+                "VB-Audio",
+                "Virtual")
+            || ContainsAnyOrdinalIgnoreCase(
+                deviceDescription,
+                "CABLE Input",
+                "CABLE-A",
+                "CABLE-B",
+                "CABLE-C",
+                "CABLE-D",
+                "Hi-Fi Cable",
+                "VoiceMeeter",
+                "VAIO3",
+                "VB-Audio",
+                "Virtual");
+    }
+
+    private static bool ContainsAnyOrdinalIgnoreCase(string source, params string[] keywords)
+    {
+        if (string.IsNullOrEmpty(source))
+        {
+            return false;
+        }
+
+        foreach (string keyword in keywords)
+        {
+            if (source.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static string? SafeGet(Func<string> getter)
