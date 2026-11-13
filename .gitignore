@@ -1,0 +1,22 @@
+# Build outputs
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.cache
+
+# Runtime / test artifacts & local voiceprint data
+*.log
+user_raw_voice.wav
+voiceprint_cache_*.bin
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# IDE / Temp
+.idea/
+.vscode/
+*.tmp

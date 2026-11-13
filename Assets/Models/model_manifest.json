@@ -1,0 +1,3922 @@
+{
+  "generated_at_utc": "2026-11-13T04:54:01.364727+00:00",
+  "python_executable": "C:\\Python313\\python.exe",
+  "python_version": "3.13.4",
+  "onnxruntime_version": "1.31.1",
+  "available_providers": [
+    "AzureExecutionProvider",
+    "CPUExecutionProvider"
+  ],
+  "models": [
+    {
+      "path": "Assets/Models/gtcrn/gtcrn_simple.onnx",
+      "filename": "gtcrn_simple.onnx",
+      "size_bytes": 535638,
+      "sha256": "e77603ac0c23dac3227dd2d7135b3a585cbee2679048aecfa886657d3ae1b534",
+      "source": {
+        "source_repo": "https://github.com/k2-fsa/sherpa-onnx/releases/tag/speech-enhancement-models",
+        "download_url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speech-enhancement-models/gtcrn_simple.onnx"
+      },
+      "onnx_protobuf": {
+        "available": true,
+        "onnx_version": "1.14.0",
+        "ir_version": 6,
+        "producer_name": "pytorch",
+        "producer_version": "1.11.0",
+        "model_version": 0,
+        "opsets": [
+          {
+            "domain": "ai.onnx",
+            "version": 11
+          }
+        ],
+        "metadata_props": {
+          "model_type": "gtcrn",
+          "comment": "gtcrn_simple",
+          "version": "1",
+          "sample_rate": "16000",
+          "model_url": "https://github.com/Xiaobin-Rong/gtcrn/blob/main/stream/onnx_models/gtcrn_simple.onnx",
+          "maintainer": "k2-fsa",
+          "comment2": "Please see also https://github.com/Xiaobin-Rong/gtcrn",
+          "conv_cache_shape": "2,1,16,16,33",
+          "tra_cache_shape": "2,3,1,1,16",
+          "inter_cache_shape": "2,1,33,16",
+          "n_fft": "512",
+          "hop_length": "256",
+          "window_length": "512",
+          "window_type": "hann_sqrt"
+        },
+        "inputs": [
+          {
+            "name": "mix",
+            "elem_type": "FLOAT",
+            "shape": [
+              1,
+              257,
+              1,
+              2
+            ]
+          },
+          {
+            "name": "conv_cache",
+            "elem_type": "FLOAT",
+            "shape": [
+              2,
+              1,
+              16,
+              16,
+              33
+            ]
+          },
+          {
+            "name": "tra_cache",
+            "elem_type": "FLOAT",
+            "shape": [
+              2,
+              3,
+              1,
+              1,
+              16
+            ]
+          },
+          {
+            "name": "inter_cache",
+            "elem_type": "FLOAT",
+            "shape": [
+              2,
+              1,
+              33,
+              16
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "enh",
+            "elem_type": "FLOAT",
+            "shape": [
+              1,
+              257,
+              1,
+              2
+            ]
+          },
+          {
+            "name": "conv_cache_out",
+            "elem_type": "FLOAT",
+            "shape": [
+              2,
+              1,
+              16,
+              16,
+              33
+            ]
+          },
+          {
+            "name": "tra_cache_out",
+            "elem_type": "FLOAT",
+            "shape": [
+              2,
+              3,
+              1,
+              1,
+              16
+            ]
+          },
+          {
+            "name": "inter_cache_out",
+            "elem_type": "FLOAT",
+            "shape": [
+              2,
+              1,
+              33,
+              16
+            ]
+          }
+        ],
+        "node_count": 415
+      },
+      "audio_params": {
+        "sample_rate": 16000,
+        "n_fft": 512,
+        "hop_length": 256,
+        "window_length": 512,
+        "window_type": "hann_sqrt",
+        "freq_bins": 257,
+        "domain": "stft_complex_frame",
+        "frame_duration_ms": 16.0,
+        "window_duration_ms": 32.0
+      },
+      "ort_cpu": {
+        "ort_version": "1.31.1",
+        "requested_providers": [
+          "CPUExecutionProvider"
+        ],
+        "session_ok": true,
+        "active_providers": [
+          "CPUExecutionProvider"
+        ],
+        "model_meta": {
+          "producer_name": "pytorch",
+          "graph_name": "torch-jit-export",
+          "domain": "",
+          "description": "",
+          "graph_description": "",
+          "version": 9223372036854775807,
+          "custom_metadata_map": {
+            "version": "1",
+            "model_type": "gtcrn",
+            "comment": "gtcrn_simple",
+            "sample_rate": "16000",
+            "conv_cache_shape": "2,1,16,16,33",
+            "model_url": "https://github.com/Xiaobin-Rong/gtcrn/blob/main/stream/onnx_models/gtcrn_simple.onnx",
+            "maintainer": "k2-fsa",
+            "comment2": "Please see also https://github.com/Xiaobin-Rong/gtcrn",
+            "tra_cache_shape": "2,3,1,1,16",
+            "inter_cache_shape": "2,1,33,16",
+            "n_fft": "512",
+            "hop_length": "256",
+            "window_length": "512",
+            "window_type": "hann_sqrt"
+          }
+        },
+        "inputs": [
+          {
+            "name": "mix",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              257,
+              1,
+              2
+            ]
+          },
+          {
+            "name": "conv_cache",
+            "type": "tensor(float)",
+            "shape": [
+              2,
+              1,
+              16,
+              16,
+              33
+            ]
+          },
+          {
+            "name": "tra_cache",
+            "type": "tensor(float)",
+            "shape": [
+              2,
+              3,
+              1,
+              1,
+              16
+            ]
+          },
+          {
+            "name": "inter_cache",
+            "type": "tensor(float)",
+            "shape": [
+              2,
+              1,
+              33,
+              16
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "enh",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              257,
+              1,
+              2
+            ]
+          },
+          {
+            "name": "conv_cache_out",
+            "type": "tensor(float)",
+            "shape": [
+              2,
+              1,
+              16,
+              16,
+              33
+            ]
+          },
+          {
+            "name": "tra_cache_out",
+            "type": "tensor(float)",
+            "shape": [
+              2,
+              3,
+              1,
+              1,
+              16
+            ]
+          },
+          {
+            "name": "inter_cache_out",
+            "type": "tensor(float)",
+            "shape": [
+              2,
+              1,
+              33,
+              16
+            ]
+          }
+        ],
+        "dummy_input_shapes": {
+          "mix": {
+            "shape": [
+              1,
+              257,
+              1,
+              2
+            ],
+            "dtype": "float32"
+          },
+          "conv_cache": {
+            "shape": [
+              2,
+              1,
+              16,
+              16,
+              33
+            ],
+            "dtype": "float32"
+          },
+          "tra_cache": {
+            "shape": [
+              2,
+              3,
+              1,
+              1,
+              16
+            ],
+            "dtype": "float32"
+          },
+          "inter_cache": {
+            "shape": [
+              2,
+              1,
+              33,
+              16
+            ],
+            "dtype": "float32"
+          }
+        },
+        "inference_ok": true,
+        "dummy_output_shapes": {
+          "enh": {
+            "shape": [
+              1,
+              257,
+              1,
+              2
+            ],
+            "dtype": "float32"
+          },
+          "conv_cache_out": {
+            "shape": [
+              2,
+              1,
+              16,
+              16,
+              33
+            ],
+            "dtype": "float32"
+          },
+          "tra_cache_out": {
+            "shape": [
+              2,
+              3,
+              1,
+              1,
+              16
+            ],
+            "dtype": "float32"
+          },
+          "inter_cache_out": {
+            "shape": [
+              2,
+              1,
+              33,
+              16
+            ],
+            "dtype": "float32"
+          }
+        }
+      },
+      "ort_cuda": {
+        "ort_version": "1.15.1",
+        "requested_providers": [
+          "CUDAExecutionProvider",
+          "CPUExecutionProvider"
+        ],
+        "session_ok": true,
+        "active_providers": [
+          "CUDAExecutionProvider",
+          "CPUExecutionProvider"
+        ],
+        "model_meta": {
+          "producer_name": "pytorch",
+          "graph_name": "torch-jit-export",
+          "domain": "",
+          "description": "",
+          "graph_description": "",
+          "version": 9223372036854775807,
+          "custom_metadata_map": {
+            "version": "1",
+            "model_type": "gtcrn",
+            "comment": "gtcrn_simple",
+            "sample_rate": "16000",
+            "conv_cache_shape": "2,1,16,16,33",
+            "model_url": "https://github.com/Xiaobin-Rong/gtcrn/blob/main/stream/onnx_models/gtcrn_simple.onnx",
+            "maintainer": "k2-fsa",
+            "comment2": "Please see also https://github.com/Xiaobin-Rong/gtcrn",
+            "tra_cache_shape": "2,3,1,1,16",
+            "inter_cache_shape": "2,1,33,16",
+            "n_fft": "512",
+            "hop_length": "256",
+            "window_length": "512",
+            "window_type": "hann_sqrt"
+          }
+        },
+        "inputs": [
+          {
+            "name": "mix",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              257,
+              1,
+              2
+            ]
+          },
+          {
+            "name": "conv_cache",
+            "type": "tensor(float)",
+            "shape": [
+              2,
+              1,
+              16,
+              16,
+              33
+            ]
+          },
+          {
+            "name": "tra_cache",
+            "type": "tensor(float)",
+            "shape": [
+              2,
+              3,
+              1,
+              1,
+              16
+            ]
+          },
+          {
+            "name": "inter_cache",
+            "type": "tensor(float)",
+            "shape": [
+              2,
+              1,
+              33,
+              16
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "enh",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              257,
+              1,
+              2
+            ]
+          },
+          {
+            "name": "conv_cache_out",
+            "type": "tensor(float)",
+            "shape": [
+              2,
+              1,
+              16,
+              16,
+              33
+            ]
+          },
+          {
+            "name": "tra_cache_out",
+            "type": "tensor(float)",
+            "shape": [
+              2,
+              3,
+              1,
+              1,
+              16
+            ]
+          },
+          {
+            "name": "inter_cache_out",
+            "type": "tensor(float)",
+            "shape": [
+              2,
+              1,
+              33,
+              16
+            ]
+          }
+        ],
+        "dummy_input_shapes": {
+          "mix": {
+            "shape": [
+              1,
+              257,
+              1,
+              2
+            ],
+            "dtype": "float32"
+          },
+          "conv_cache": {
+            "shape": [
+              2,
+              1,
+              16,
+              16,
+              33
+            ],
+            "dtype": "float32"
+          },
+          "tra_cache": {
+            "shape": [
+              2,
+              3,
+              1,
+              1,
+              16
+            ],
+            "dtype": "float32"
+          },
+          "inter_cache": {
+            "shape": [
+              2,
+              1,
+              33,
+              16
+            ],
+            "dtype": "float32"
+          }
+        },
+        "inference_ok": true,
+        "dummy_output_shapes": {
+          "enh": {
+            "shape": [
+              1,
+              257,
+              1,
+              2
+            ],
+            "dtype": "float32"
+          },
+          "conv_cache_out": {
+            "shape": [
+              2,
+              1,
+              16,
+              16,
+              33
+            ],
+            "dtype": "float32"
+          },
+          "tra_cache_out": {
+            "shape": [
+              2,
+              3,
+              1,
+              1,
+              16
+            ],
+            "dtype": "float32"
+          },
+          "inter_cache_out": {
+            "shape": [
+              2,
+              1,
+              33,
+              16
+            ],
+            "dtype": "float32"
+          }
+        }
+      },
+      "ort_secondary_cpu": {
+        "ort_version": "1.15.1",
+        "requested_providers": [
+          "CPUExecutionProvider"
+        ],
+        "session_ok": true,
+        "active_providers": [
+          "CPUExecutionProvider"
+        ],
+        "model_meta": {
+          "producer_name": "pytorch",
+          "graph_name": "torch-jit-export",
+          "domain": "",
+          "description": "",
+          "graph_description": "",
+          "version": 9223372036854775807,
+          "custom_metadata_map": {
+            "version": "1",
+            "model_type": "gtcrn",
+            "comment": "gtcrn_simple",
+            "sample_rate": "16000",
+            "conv_cache_shape": "2,1,16,16,33",
+            "model_url": "https://github.com/Xiaobin-Rong/gtcrn/blob/main/stream/onnx_models/gtcrn_simple.onnx",
+            "maintainer": "k2-fsa",
+            "comment2": "Please see also https://github.com/Xiaobin-Rong/gtcrn",
+            "tra_cache_shape": "2,3,1,1,16",
+            "inter_cache_shape": "2,1,33,16",
+            "n_fft": "512",
+            "hop_length": "256",
+            "window_length": "512",
+            "window_type": "hann_sqrt"
+          }
+        },
+        "inputs": [
+          {
+            "name": "mix",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              257,
+              1,
+              2
+            ]
+          },
+          {
+            "name": "conv_cache",
+            "type": "tensor(float)",
+            "shape": [
+              2,
+              1,
+              16,
+              16,
+              33
+            ]
+          },
+          {
+            "name": "tra_cache",
+            "type": "tensor(float)",
+            "shape": [
+              2,
+              3,
+              1,
+              1,
+              16
+            ]
+          },
+          {
+            "name": "inter_cache",
+            "type": "tensor(float)",
+            "shape": [
+              2,
+              1,
+              33,
+              16
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "enh",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              257,
+              1,
+              2
+            ]
+          },
+          {
+            "name": "conv_cache_out",
+            "type": "tensor(float)",
+            "shape": [
+              2,
+              1,
+              16,
+              16,
+              33
+            ]
+          },
+          {
+            "name": "tra_cache_out",
+            "type": "tensor(float)",
+            "shape": [
+              2,
+              3,
+              1,
+              1,
+              16
+            ]
+          },
+          {
+            "name": "inter_cache_out",
+            "type": "tensor(float)",
+            "shape": [
+              2,
+              1,
+              33,
+              16
+            ]
+          }
+        ],
+        "dummy_input_shapes": {
+          "mix": {
+            "shape": [
+              1,
+              257,
+              1,
+              2
+            ],
+            "dtype": "float32"
+          },
+          "conv_cache": {
+            "shape": [
+              2,
+              1,
+              16,
+              16,
+              33
+            ],
+            "dtype": "float32"
+          },
+          "tra_cache": {
+            "shape": [
+              2,
+              3,
+              1,
+              1,
+              16
+            ],
+            "dtype": "float32"
+          },
+          "inter_cache": {
+            "shape": [
+              2,
+              1,
+              33,
+              16
+            ],
+            "dtype": "float32"
+          }
+        },
+        "inference_ok": true,
+        "dummy_output_shapes": {
+          "enh": {
+            "shape": [
+              1,
+              257,
+              1,
+              2
+            ],
+            "dtype": "float32"
+          },
+          "conv_cache_out": {
+            "shape": [
+              2,
+              1,
+              16,
+              16,
+              33
+            ],
+            "dtype": "float32"
+          },
+          "tra_cache_out": {
+            "shape": [
+              2,
+              3,
+              1,
+              1,
+              16
+            ],
+            "dtype": "float32"
+          },
+          "inter_cache_out": {
+            "shape": [
+              2,
+              1,
+              33,
+              16
+            ],
+            "dtype": "float32"
+          }
+        }
+      }
+    },
+    {
+      "path": "Assets/Models/silero-vad/silero_vad.onnx",
+      "filename": "silero_vad.onnx",
+      "size_bytes": 2327524,
+      "sha256": "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3",
+      "source": {
+        "source_repo": "https://github.com/snakers4/silero-vad/blob/master/src/silero_vad/data/silero_vad.onnx",
+        "download_url": "https://raw.githubusercontent.com/snakers4/silero-vad/master/src/silero_vad/data/silero_vad.onnx"
+      },
+      "onnx_protobuf": {
+        "available": true,
+        "onnx_version": "1.14.0",
+        "ir_version": 8,
+        "producer_name": "spox",
+        "producer_version": "",
+        "model_version": 0,
+        "opsets": [
+          {
+            "domain": "ai.onnx",
+            "version": 16
+          }
+        ],
+        "metadata_props": {},
+        "inputs": [
+          {
+            "name": "input",
+            "elem_type": "FLOAT",
+            "shape": [
+              null,
+              null
+            ]
+          },
+          {
+            "name": "state",
+            "elem_type": "FLOAT",
+            "shape": [
+              2,
+              null,
+              128
+            ]
+          },
+          {
+            "name": "sr",
+            "elem_type": "INT64",
+            "shape": []
+          }
+        ],
+        "outputs": [
+          {
+            "name": "output",
+            "elem_type": "FLOAT",
+            "shape": [
+              null,
+              1
+            ]
+          },
+          {
+            "name": "stateN",
+            "elem_type": "FLOAT",
+            "shape": [
+              null,
+              null,
+              null
+            ]
+          }
+        ],
+        "node_count": 5
+      },
+      "audio_params": {
+        "supported_sample_rates": [
+          8000,
+          16000
+        ],
+        "sample_rate": 16000,
+        "window_size_samples_16k": 512,
+        "context_samples_16k": 64,
+        "effective_model_input_samples_16k": 576,
+        "window_size_samples_8k": 256,
+        "frame_duration_ms": 32.0,
+        "domain": "time_domain_pcm_float32"
+      },
+      "ort_cpu": {
+        "ort_version": "1.31.1",
+        "requested_providers": [
+          "CPUExecutionProvider"
+        ],
+        "session_ok": true,
+        "active_providers": [
+          "CPUExecutionProvider"
+        ],
+        "model_meta": {
+          "producer_name": "spox",
+          "graph_name": "spox_graph",
+          "domain": "",
+          "description": "",
+          "graph_description": "",
+          "version": 9223372036854775807,
+          "custom_metadata_map": {}
+        },
+        "inputs": [
+          {
+            "name": "input",
+            "type": "tensor(float)",
+            "shape": [
+              null,
+              null
+            ]
+          },
+          {
+            "name": "state",
+            "type": "tensor(float)",
+            "shape": [
+              2,
+              null,
+              128
+            ]
+          },
+          {
+            "name": "sr",
+            "type": "tensor(int64)",
+            "shape": []
+          }
+        ],
+        "outputs": [
+          {
+            "name": "output",
+            "type": "tensor(float)",
+            "shape": [
+              null,
+              1
+            ]
+          },
+          {
+            "name": "stateN",
+            "type": "tensor(float)",
+            "shape": [
+              null,
+              null,
+              null
+            ]
+          }
+        ],
+        "dummy_input_shapes": {
+          "input": {
+            "shape": [
+              1,
+              576
+            ],
+            "dtype": "float32"
+          },
+          "state": {
+            "shape": [
+              2,
+              1,
+              128
+            ],
+            "dtype": "float32"
+          },
+          "sr": {
+            "shape": [],
+            "dtype": "int64"
+          }
+        },
+        "inference_ok": true,
+        "dummy_output_shapes": {
+          "output": {
+            "shape": [
+              1,
+              1
+            ],
+            "dtype": "float32"
+          },
+          "stateN": {
+            "shape": [
+              2,
+              1,
+              128
+            ],
+            "dtype": "float32"
+          }
+        }
+      },
+      "ort_cuda": {
+        "ort_version": "1.15.1",
+        "requested_providers": [
+          "CUDAExecutionProvider",
+          "CPUExecutionProvider"
+        ],
+        "session_ok": true,
+        "active_providers": [
+          "CUDAExecutionProvider",
+          "CPUExecutionProvider"
+        ],
+        "model_meta": {
+          "producer_name": "spox",
+          "graph_name": "spox_graph",
+          "domain": "",
+          "description": "",
+          "graph_description": "",
+          "version": 9223372036854775807,
+          "custom_metadata_map": {}
+        },
+        "inputs": [
+          {
+            "name": "input",
+            "type": "tensor(float)",
+            "shape": [
+              null,
+              null
+            ]
+          },
+          {
+            "name": "state",
+            "type": "tensor(float)",
+            "shape": [
+              2,
+              null,
+              128
+            ]
+          },
+          {
+            "name": "sr",
+            "type": "tensor(int64)",
+            "shape": []
+          }
+        ],
+        "outputs": [
+          {
+            "name": "output",
+            "type": "tensor(float)",
+            "shape": [
+              null,
+              1
+            ]
+          },
+          {
+            "name": "stateN",
+            "type": "tensor(float)",
+            "shape": [
+              null,
+              null,
+              null
+            ]
+          }
+        ],
+        "dummy_input_shapes": {
+          "input": {
+            "shape": [
+              1,
+              576
+            ],
+            "dtype": "float32"
+          },
+          "state": {
+            "shape": [
+              2,
+              1,
+              128
+            ],
+            "dtype": "float32"
+          },
+          "sr": {
+            "shape": [],
+            "dtype": "int64"
+          }
+        },
+        "inference_ok": true,
+        "dummy_output_shapes": {
+          "output": {
+            "shape": [
+              1,
+              1
+            ],
+            "dtype": "float32"
+          },
+          "stateN": {
+            "shape": [
+              2,
+              1,
+              128
+            ],
+            "dtype": "float32"
+          }
+        }
+      },
+      "ort_secondary_cpu": {
+        "ort_version": "1.15.1",
+        "requested_providers": [
+          "CPUExecutionProvider"
+        ],
+        "session_ok": true,
+        "active_providers": [
+          "CPUExecutionProvider"
+        ],
+        "model_meta": {
+          "producer_name": "spox",
+          "graph_name": "spox_graph",
+          "domain": "",
+          "description": "",
+          "graph_description": "",
+          "version": 9223372036854775807,
+          "custom_metadata_map": {}
+        },
+        "inputs": [
+          {
+            "name": "input",
+            "type": "tensor(float)",
+            "shape": [
+              null,
+              null
+            ]
+          },
+          {
+            "name": "state",
+            "type": "tensor(float)",
+            "shape": [
+              2,
+              null,
+              128
+            ]
+          },
+          {
+            "name": "sr",
+            "type": "tensor(int64)",
+            "shape": []
+          }
+        ],
+        "outputs": [
+          {
+            "name": "output",
+            "type": "tensor(float)",
+            "shape": [
+              null,
+              1
+            ]
+          },
+          {
+            "name": "stateN",
+            "type": "tensor(float)",
+            "shape": [
+              null,
+              null,
+              null
+            ]
+          }
+        ],
+        "dummy_input_shapes": {
+          "input": {
+            "shape": [
+              1,
+              576
+            ],
+            "dtype": "float32"
+          },
+          "state": {
+            "shape": [
+              2,
+              1,
+              128
+            ],
+            "dtype": "float32"
+          },
+          "sr": {
+            "shape": [],
+            "dtype": "int64"
+          }
+        },
+        "inference_ok": true,
+        "dummy_output_shapes": {
+          "output": {
+            "shape": [
+              1,
+              1
+            ],
+            "dtype": "float32"
+          },
+          "stateN": {
+            "shape": [
+              2,
+              1,
+              128
+            ],
+            "dtype": "float32"
+          }
+        }
+      }
+    },
+    {
+      "path": "Assets/Models/voxlock/v2/chunk_fp16.onnx",
+      "filename": "chunk_fp16.onnx",
+      "size_bytes": 38947947,
+      "sha256": "c4850d3bff7cacfed360ef4708a448ced1b6bf0eb43aff06e764099c9db02e3b",
+      "source": {
+        "source_repo": "https://huggingface.co/arbazsiddiqui/voxlock",
+        "remote_path": "onnx/v2/chunk_fp16.onnx"
+      },
+      "onnx_protobuf": {
+        "available": true,
+        "onnx_version": "1.14.0",
+        "ir_version": 8,
+        "producer_name": "pytorch",
+        "producer_version": "2.7.1",
+        "model_version": 0,
+        "opsets": [
+          {
+            "domain": "ai.onnx",
+            "version": 17
+          }
+        ],
+        "metadata_props": {},
+        "inputs": [
+          {
+            "name": "wav",
+            "elem_type": "FLOAT",
+            "shape": [
+              1,
+              "S"
+            ]
+          },
+          {
+            "name": "enroll_n",
+            "elem_type": "FLOAT",
+            "shape": [
+              257,
+              376
+            ]
+          },
+          {
+            "name": "k",
+            "elem_type": "FLOAT",
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ]
+          },
+          {
+            "name": "v",
+            "elem_type": "FLOAT",
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ]
+          },
+          {
+            "name": "h",
+            "elem_type": "FLOAT",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          },
+          {
+            "name": "c",
+            "elem_type": "FLOAT",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "frames",
+            "elem_type": "FLOAT",
+            "shape": [
+              1,
+              "K",
+              512
+            ]
+          },
+          {
+            "name": "h_out",
+            "elem_type": "FLOAT",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          },
+          {
+            "name": "c_out",
+            "elem_type": "FLOAT",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          }
+        ],
+        "node_count": 595
+      },
+      "audio_params": {
+        "sample_rate": 16000,
+        "n_fft": 512,
+        "hop_length": 128,
+        "reflect_pad_samples": 256,
+        "chunk_formula_samples": "512 + (K - 1) * 128",
+        "overlap_samples": 384,
+        "algorithmic_latency_ms": 24.0,
+        "window_type": "hann_periodic_squared_ola",
+        "output_gain_multiplier": -0.5,
+        "domain": "time_domain_pcm_float32"
+      },
+      "ort_cpu": {
+        "ort_version": "1.31.1",
+        "requested_providers": [
+          "CPUExecutionProvider"
+        ],
+        "session_ok": true,
+        "active_providers": [
+          "CPUExecutionProvider"
+        ],
+        "model_meta": {
+          "producer_name": "pytorch",
+          "graph_name": "main_graph",
+          "domain": "",
+          "description": "",
+          "graph_description": "",
+          "version": 9223372036854775807,
+          "custom_metadata_map": {}
+        },
+        "inputs": [
+          {
+            "name": "wav",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              "S"
+            ]
+          },
+          {
+            "name": "enroll_n",
+            "type": "tensor(float)",
+            "shape": [
+              257,
+              376
+            ]
+          },
+          {
+            "name": "k",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ]
+          },
+          {
+            "name": "v",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ]
+          },
+          {
+            "name": "h",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          },
+          {
+            "name": "c",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "frames",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              "K",
+              512
+            ]
+          },
+          {
+            "name": "h_out",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          },
+          {
+            "name": "c_out",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          }
+        ],
+        "dummy_input_shapes": {
+          "wav": {
+            "shape": [
+              1,
+              896
+            ],
+            "dtype": "float32"
+          },
+          "enroll_n": {
+            "shape": [
+              257,
+              376
+            ],
+            "dtype": "float32"
+          },
+          "k": {
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ],
+            "dtype": "float32"
+          },
+          "v": {
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ],
+            "dtype": "float32"
+          },
+          "h": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          },
+          "c": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          }
+        },
+        "inference_ok": true,
+        "dummy_output_shapes": {
+          "frames": {
+            "shape": [
+              1,
+              4,
+              512
+            ],
+            "dtype": "float32"
+          },
+          "h_out": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          },
+          "c_out": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          }
+        }
+      },
+      "ort_cuda": {
+        "ort_version": "1.15.1",
+        "requested_providers": [
+          "CUDAExecutionProvider",
+          "CPUExecutionProvider"
+        ],
+        "session_ok": true,
+        "active_providers": [
+          "CUDAExecutionProvider",
+          "CPUExecutionProvider"
+        ],
+        "model_meta": {
+          "producer_name": "pytorch",
+          "graph_name": "main_graph",
+          "domain": "",
+          "description": "",
+          "graph_description": "",
+          "version": 9223372036854775807,
+          "custom_metadata_map": {}
+        },
+        "inputs": [
+          {
+            "name": "wav",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              "S"
+            ]
+          },
+          {
+            "name": "enroll_n",
+            "type": "tensor(float)",
+            "shape": [
+              257,
+              376
+            ]
+          },
+          {
+            "name": "k",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ]
+          },
+          {
+            "name": "v",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ]
+          },
+          {
+            "name": "h",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          },
+          {
+            "name": "c",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "frames",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              "K",
+              512
+            ]
+          },
+          {
+            "name": "h_out",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          },
+          {
+            "name": "c_out",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          }
+        ],
+        "dummy_input_shapes": {
+          "wav": {
+            "shape": [
+              1,
+              896
+            ],
+            "dtype": "float32"
+          },
+          "enroll_n": {
+            "shape": [
+              257,
+              376
+            ],
+            "dtype": "float32"
+          },
+          "k": {
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ],
+            "dtype": "float32"
+          },
+          "v": {
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ],
+            "dtype": "float32"
+          },
+          "h": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          },
+          "c": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          }
+        },
+        "inference_ok": true,
+        "dummy_output_shapes": {
+          "frames": {
+            "shape": [
+              1,
+              4,
+              512
+            ],
+            "dtype": "float32"
+          },
+          "h_out": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          },
+          "c_out": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          }
+        }
+      },
+      "ort_secondary_cpu": {
+        "ort_version": "1.15.1",
+        "requested_providers": [
+          "CPUExecutionProvider"
+        ],
+        "session_ok": true,
+        "active_providers": [
+          "CPUExecutionProvider"
+        ],
+        "model_meta": {
+          "producer_name": "pytorch",
+          "graph_name": "main_graph",
+          "domain": "",
+          "description": "",
+          "graph_description": "",
+          "version": 9223372036854775807,
+          "custom_metadata_map": {}
+        },
+        "inputs": [
+          {
+            "name": "wav",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              "S"
+            ]
+          },
+          {
+            "name": "enroll_n",
+            "type": "tensor(float)",
+            "shape": [
+              257,
+              376
+            ]
+          },
+          {
+            "name": "k",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ]
+          },
+          {
+            "name": "v",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ]
+          },
+          {
+            "name": "h",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          },
+          {
+            "name": "c",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "frames",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              "K",
+              512
+            ]
+          },
+          {
+            "name": "h_out",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          },
+          {
+            "name": "c_out",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          }
+        ],
+        "dummy_input_shapes": {
+          "wav": {
+            "shape": [
+              1,
+              896
+            ],
+            "dtype": "float32"
+          },
+          "enroll_n": {
+            "shape": [
+              257,
+              376
+            ],
+            "dtype": "float32"
+          },
+          "k": {
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ],
+            "dtype": "float32"
+          },
+          "v": {
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ],
+            "dtype": "float32"
+          },
+          "h": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          },
+          "c": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          }
+        },
+        "inference_ok": true,
+        "dummy_output_shapes": {
+          "frames": {
+            "shape": [
+              1,
+              4,
+              512
+            ],
+            "dtype": "float32"
+          },
+          "h_out": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          },
+          "c_out": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          }
+        }
+      }
+    },
+    {
+      "path": "Assets/Models/voxlock/v2/chunk_int8.onnx",
+      "filename": "chunk_int8.onnx",
+      "size_bytes": 56560589,
+      "sha256": "c50ffdc8d723fd4f91cb08889f3d0143491f95967b705f35c444a0b4afe88172",
+      "source": {
+        "source_repo": "https://huggingface.co/arbazsiddiqui/voxlock",
+        "remote_path": "onnx/v2/chunk_int8.onnx"
+      },
+      "onnx_protobuf": {
+        "available": true,
+        "onnx_version": "1.14.0",
+        "ir_version": 8,
+        "producer_name": "onnx.quantize",
+        "producer_version": "0.1.0",
+        "model_version": 0,
+        "opsets": [
+          {
+            "domain": "ai.onnx",
+            "version": 17
+          },
+          {
+            "domain": "com.microsoft",
+            "version": 1
+          }
+        ],
+        "metadata_props": {
+          "onnx.infer": "onnxruntime.quant"
+        },
+        "inputs": [
+          {
+            "name": "wav",
+            "elem_type": "FLOAT",
+            "shape": [
+              1,
+              "S"
+            ]
+          },
+          {
+            "name": "enroll_n",
+            "elem_type": "FLOAT",
+            "shape": [
+              257,
+              376
+            ]
+          },
+          {
+            "name": "k",
+            "elem_type": "FLOAT",
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ]
+          },
+          {
+            "name": "v",
+            "elem_type": "FLOAT",
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ]
+          },
+          {
+            "name": "h",
+            "elem_type": "FLOAT",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          },
+          {
+            "name": "c",
+            "elem_type": "FLOAT",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "frames",
+            "elem_type": "FLOAT",
+            "shape": [
+              1,
+              "K",
+              512
+            ]
+          },
+          {
+            "name": "h_out",
+            "elem_type": "FLOAT",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          },
+          {
+            "name": "c_out",
+            "elem_type": "FLOAT",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          }
+        ],
+        "node_count": 485
+      },
+      "audio_params": {
+        "sample_rate": 16000,
+        "n_fft": 512,
+        "hop_length": 128,
+        "reflect_pad_samples": 256,
+        "chunk_formula_samples": "512 + (K - 1) * 128",
+        "overlap_samples": 384,
+        "algorithmic_latency_ms": 24.0,
+        "window_type": "hann_periodic_squared_ola",
+        "output_gain_multiplier": -0.5,
+        "domain": "time_domain_pcm_float32"
+      },
+      "ort_cpu": {
+        "ort_version": "1.31.1",
+        "requested_providers": [
+          "CPUExecutionProvider"
+        ],
+        "session_ok": true,
+        "active_providers": [
+          "CPUExecutionProvider"
+        ],
+        "model_meta": {
+          "producer_name": "onnx.quantize",
+          "graph_name": "main_graph",
+          "domain": "",
+          "description": "",
+          "graph_description": "",
+          "version": 9223372036854775807,
+          "custom_metadata_map": {
+            "onnx.infer": "onnxruntime.quant"
+          }
+        },
+        "inputs": [
+          {
+            "name": "wav",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              "S"
+            ]
+          },
+          {
+            "name": "enroll_n",
+            "type": "tensor(float)",
+            "shape": [
+              257,
+              376
+            ]
+          },
+          {
+            "name": "k",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ]
+          },
+          {
+            "name": "v",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ]
+          },
+          {
+            "name": "h",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          },
+          {
+            "name": "c",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "frames",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              "K",
+              512
+            ]
+          },
+          {
+            "name": "h_out",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          },
+          {
+            "name": "c_out",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          }
+        ],
+        "dummy_input_shapes": {
+          "wav": {
+            "shape": [
+              1,
+              896
+            ],
+            "dtype": "float32"
+          },
+          "enroll_n": {
+            "shape": [
+              257,
+              376
+            ],
+            "dtype": "float32"
+          },
+          "k": {
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ],
+            "dtype": "float32"
+          },
+          "v": {
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ],
+            "dtype": "float32"
+          },
+          "h": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          },
+          "c": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          }
+        },
+        "inference_ok": true,
+        "dummy_output_shapes": {
+          "frames": {
+            "shape": [
+              1,
+              4,
+              512
+            ],
+            "dtype": "float32"
+          },
+          "h_out": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          },
+          "c_out": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          }
+        }
+      },
+      "ort_cuda": {
+        "ort_version": "1.15.1",
+        "requested_providers": [
+          "CUDAExecutionProvider",
+          "CPUExecutionProvider"
+        ],
+        "session_ok": true,
+        "active_providers": [
+          "CUDAExecutionProvider",
+          "CPUExecutionProvider"
+        ],
+        "model_meta": {
+          "producer_name": "onnx.quantize",
+          "graph_name": "main_graph",
+          "domain": "",
+          "description": "",
+          "graph_description": "",
+          "version": 9223372036854775807,
+          "custom_metadata_map": {
+            "onnx.infer": "onnxruntime.quant"
+          }
+        },
+        "inputs": [
+          {
+            "name": "wav",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              "S"
+            ]
+          },
+          {
+            "name": "enroll_n",
+            "type": "tensor(float)",
+            "shape": [
+              257,
+              376
+            ]
+          },
+          {
+            "name": "k",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ]
+          },
+          {
+            "name": "v",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ]
+          },
+          {
+            "name": "h",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          },
+          {
+            "name": "c",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "frames",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              "K",
+              512
+            ]
+          },
+          {
+            "name": "h_out",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          },
+          {
+            "name": "c_out",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          }
+        ],
+        "dummy_input_shapes": {
+          "wav": {
+            "shape": [
+              1,
+              896
+            ],
+            "dtype": "float32"
+          },
+          "enroll_n": {
+            "shape": [
+              257,
+              376
+            ],
+            "dtype": "float32"
+          },
+          "k": {
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ],
+            "dtype": "float32"
+          },
+          "v": {
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ],
+            "dtype": "float32"
+          },
+          "h": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          },
+          "c": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          }
+        },
+        "inference_ok": true,
+        "dummy_output_shapes": {
+          "frames": {
+            "shape": [
+              1,
+              4,
+              512
+            ],
+            "dtype": "float32"
+          },
+          "h_out": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          },
+          "c_out": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          }
+        }
+      },
+      "ort_secondary_cpu": {
+        "ort_version": "1.15.1",
+        "requested_providers": [
+          "CPUExecutionProvider"
+        ],
+        "session_ok": true,
+        "active_providers": [
+          "CPUExecutionProvider"
+        ],
+        "model_meta": {
+          "producer_name": "onnx.quantize",
+          "graph_name": "main_graph",
+          "domain": "",
+          "description": "",
+          "graph_description": "",
+          "version": 9223372036854775807,
+          "custom_metadata_map": {
+            "onnx.infer": "onnxruntime.quant"
+          }
+        },
+        "inputs": [
+          {
+            "name": "wav",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              "S"
+            ]
+          },
+          {
+            "name": "enroll_n",
+            "type": "tensor(float)",
+            "shape": [
+              257,
+              376
+            ]
+          },
+          {
+            "name": "k",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ]
+          },
+          {
+            "name": "v",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ]
+          },
+          {
+            "name": "h",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          },
+          {
+            "name": "c",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "frames",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              "K",
+              512
+            ]
+          },
+          {
+            "name": "h_out",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          },
+          {
+            "name": "c_out",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          }
+        ],
+        "dummy_input_shapes": {
+          "wav": {
+            "shape": [
+              1,
+              896
+            ],
+            "dtype": "float32"
+          },
+          "enroll_n": {
+            "shape": [
+              257,
+              376
+            ],
+            "dtype": "float32"
+          },
+          "k": {
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ],
+            "dtype": "float32"
+          },
+          "v": {
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ],
+            "dtype": "float32"
+          },
+          "h": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          },
+          "c": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          }
+        },
+        "inference_ok": true,
+        "dummy_output_shapes": {
+          "frames": {
+            "shape": [
+              1,
+              4,
+              512
+            ],
+            "dtype": "float32"
+          },
+          "h_out": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          },
+          "c_out": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          }
+        }
+      }
+    },
+    {
+      "path": "Assets/Models/voxlock/v2/chunk_int8_full.onnx",
+      "filename": "chunk_int8_full.onnx",
+      "size_bytes": 53918181,
+      "sha256": "74370a17831ef80bb834d9824f6ba36b3168ebbf472d47c3b23432049c577ad4",
+      "source": {
+        "source_repo": "https://huggingface.co/arbazsiddiqui/voxlock",
+        "remote_path": "onnx/v2/chunk_int8_full.onnx"
+      },
+      "onnx_protobuf": {
+        "available": true,
+        "onnx_version": "1.14.0",
+        "ir_version": 8,
+        "producer_name": "onnx.quantize",
+        "producer_version": "0.1.0",
+        "model_version": 0,
+        "opsets": [
+          {
+            "domain": "ai.onnx",
+            "version": 17
+          },
+          {
+            "domain": "com.microsoft",
+            "version": 1
+          }
+        ],
+        "metadata_props": {
+          "onnx.infer": "onnxruntime.quant"
+        },
+        "inputs": [
+          {
+            "name": "wav",
+            "elem_type": "FLOAT",
+            "shape": [
+              1,
+              "S"
+            ]
+          },
+          {
+            "name": "enroll_n",
+            "elem_type": "FLOAT",
+            "shape": [
+              257,
+              376
+            ]
+          },
+          {
+            "name": "k",
+            "elem_type": "FLOAT",
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ]
+          },
+          {
+            "name": "v",
+            "elem_type": "FLOAT",
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ]
+          },
+          {
+            "name": "h",
+            "elem_type": "FLOAT",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          },
+          {
+            "name": "c",
+            "elem_type": "FLOAT",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "frames",
+            "elem_type": "FLOAT",
+            "shape": [
+              1,
+              "K",
+              512
+            ]
+          },
+          {
+            "name": "h_out",
+            "elem_type": "FLOAT",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          },
+          {
+            "name": "c_out",
+            "elem_type": "FLOAT",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          }
+        ],
+        "node_count": 549
+      },
+      "audio_params": {
+        "sample_rate": 16000,
+        "n_fft": 512,
+        "hop_length": 128,
+        "reflect_pad_samples": 256,
+        "chunk_formula_samples": "512 + (K - 1) * 128",
+        "overlap_samples": 384,
+        "algorithmic_latency_ms": 24.0,
+        "window_type": "hann_periodic_squared_ola",
+        "output_gain_multiplier": -0.5,
+        "domain": "time_domain_pcm_float32"
+      },
+      "ort_cpu": {
+        "ort_version": "1.31.1",
+        "requested_providers": [
+          "CPUExecutionProvider"
+        ],
+        "session_ok": true,
+        "active_providers": [
+          "CPUExecutionProvider"
+        ],
+        "model_meta": {
+          "producer_name": "onnx.quantize",
+          "graph_name": "main_graph",
+          "domain": "",
+          "description": "",
+          "graph_description": "",
+          "version": 9223372036854775807,
+          "custom_metadata_map": {
+            "onnx.infer": "onnxruntime.quant"
+          }
+        },
+        "inputs": [
+          {
+            "name": "wav",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              "S"
+            ]
+          },
+          {
+            "name": "enroll_n",
+            "type": "tensor(float)",
+            "shape": [
+              257,
+              376
+            ]
+          },
+          {
+            "name": "k",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ]
+          },
+          {
+            "name": "v",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ]
+          },
+          {
+            "name": "h",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          },
+          {
+            "name": "c",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "frames",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              "K",
+              512
+            ]
+          },
+          {
+            "name": "h_out",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          },
+          {
+            "name": "c_out",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          }
+        ],
+        "dummy_input_shapes": {
+          "wav": {
+            "shape": [
+              1,
+              896
+            ],
+            "dtype": "float32"
+          },
+          "enroll_n": {
+            "shape": [
+              257,
+              376
+            ],
+            "dtype": "float32"
+          },
+          "k": {
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ],
+            "dtype": "float32"
+          },
+          "v": {
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ],
+            "dtype": "float32"
+          },
+          "h": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          },
+          "c": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          }
+        },
+        "inference_ok": true,
+        "dummy_output_shapes": {
+          "frames": {
+            "shape": [
+              1,
+              4,
+              512
+            ],
+            "dtype": "float32"
+          },
+          "h_out": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          },
+          "c_out": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          }
+        }
+      },
+      "ort_cuda": {
+        "ort_version": "1.15.1",
+        "requested_providers": [
+          "CUDAExecutionProvider",
+          "CPUExecutionProvider"
+        ],
+        "session_ok": true,
+        "active_providers": [
+          "CUDAExecutionProvider",
+          "CPUExecutionProvider"
+        ],
+        "model_meta": {
+          "producer_name": "onnx.quantize",
+          "graph_name": "main_graph",
+          "domain": "",
+          "description": "",
+          "graph_description": "",
+          "version": 9223372036854775807,
+          "custom_metadata_map": {
+            "onnx.infer": "onnxruntime.quant"
+          }
+        },
+        "inputs": [
+          {
+            "name": "wav",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              "S"
+            ]
+          },
+          {
+            "name": "enroll_n",
+            "type": "tensor(float)",
+            "shape": [
+              257,
+              376
+            ]
+          },
+          {
+            "name": "k",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ]
+          },
+          {
+            "name": "v",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ]
+          },
+          {
+            "name": "h",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          },
+          {
+            "name": "c",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "frames",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              "K",
+              512
+            ]
+          },
+          {
+            "name": "h_out",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          },
+          {
+            "name": "c_out",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          }
+        ],
+        "dummy_input_shapes": {
+          "wav": {
+            "shape": [
+              1,
+              896
+            ],
+            "dtype": "float32"
+          },
+          "enroll_n": {
+            "shape": [
+              257,
+              376
+            ],
+            "dtype": "float32"
+          },
+          "k": {
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ],
+            "dtype": "float32"
+          },
+          "v": {
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ],
+            "dtype": "float32"
+          },
+          "h": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          },
+          "c": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          }
+        },
+        "inference_ok": true,
+        "dummy_output_shapes": {
+          "frames": {
+            "shape": [
+              1,
+              4,
+              512
+            ],
+            "dtype": "float32"
+          },
+          "h_out": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          },
+          "c_out": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          }
+        }
+      },
+      "ort_secondary_cpu": {
+        "ort_version": "1.15.1",
+        "requested_providers": [
+          "CPUExecutionProvider"
+        ],
+        "session_ok": true,
+        "active_providers": [
+          "CPUExecutionProvider"
+        ],
+        "model_meta": {
+          "producer_name": "onnx.quantize",
+          "graph_name": "main_graph",
+          "domain": "",
+          "description": "",
+          "graph_description": "",
+          "version": 9223372036854775807,
+          "custom_metadata_map": {
+            "onnx.infer": "onnxruntime.quant"
+          }
+        },
+        "inputs": [
+          {
+            "name": "wav",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              "S"
+            ]
+          },
+          {
+            "name": "enroll_n",
+            "type": "tensor(float)",
+            "shape": [
+              257,
+              376
+            ]
+          },
+          {
+            "name": "k",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ]
+          },
+          {
+            "name": "v",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ]
+          },
+          {
+            "name": "h",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          },
+          {
+            "name": "c",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "frames",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              "K",
+              512
+            ]
+          },
+          {
+            "name": "h_out",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          },
+          {
+            "name": "c_out",
+            "type": "tensor(float)",
+            "shape": [
+              6,
+              32,
+              256
+            ]
+          }
+        ],
+        "dummy_input_shapes": {
+          "wav": {
+            "shape": [
+              1,
+              896
+            ],
+            "dtype": "float32"
+          },
+          "enroll_n": {
+            "shape": [
+              257,
+              376
+            ],
+            "dtype": "float32"
+          },
+          "k": {
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ],
+            "dtype": "float32"
+          },
+          "v": {
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ],
+            "dtype": "float32"
+          },
+          "h": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          },
+          "c": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          }
+        },
+        "inference_ok": true,
+        "dummy_output_shapes": {
+          "frames": {
+            "shape": [
+              1,
+              4,
+              512
+            ],
+            "dtype": "float32"
+          },
+          "h_out": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          },
+          "c_out": {
+            "shape": [
+              6,
+              32,
+              256
+            ],
+            "dtype": "float32"
+          }
+        }
+      }
+    },
+    {
+      "path": "Assets/Models/voxlock/v2/enroll.onnx",
+      "filename": "enroll.onnx",
+      "size_bytes": 21023799,
+      "sha256": "81f305c9b7a32f13d1401f53bb4c6301826a607c9e807e60912f36ef1b9fae29",
+      "source": {
+        "source_repo": "https://huggingface.co/arbazsiddiqui/voxlock",
+        "remote_path": "onnx/v2/enroll.onnx"
+      },
+      "onnx_protobuf": {
+        "available": true,
+        "onnx_version": "1.14.0",
+        "ir_version": 8,
+        "producer_name": "pytorch",
+        "producer_version": "2.7.1",
+        "model_version": 0,
+        "opsets": [
+          {
+            "domain": "ai.onnx",
+            "version": 17
+          }
+        ],
+        "metadata_props": {},
+        "inputs": [
+          {
+            "name": "enroll",
+            "elem_type": "FLOAT",
+            "shape": [
+              1,
+              48000
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "enroll_n",
+            "elem_type": "FLOAT",
+            "shape": [
+              257,
+              376
+            ]
+          },
+          {
+            "name": "k",
+            "elem_type": "FLOAT",
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ]
+          },
+          {
+            "name": "v",
+            "elem_type": "FLOAT",
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ]
+          }
+        ],
+        "node_count": 186
+      },
+      "audio_params": {
+        "sample_rate": 16000,
+        "min_enroll_samples": 48000,
+        "min_enroll_seconds": 3.0,
+        "fbank_win_length_samples": 400,
+        "fbank_hop_length_samples": 160,
+        "fbank_num_mel_bins": 80,
+        "stft_n_fft": 512,
+        "stft_hop_length": 128,
+        "domain": "time_domain_pcm_float32"
+      },
+      "ort_cpu": {
+        "ort_version": "1.31.1",
+        "requested_providers": [
+          "CPUExecutionProvider"
+        ],
+        "session_ok": true,
+        "active_providers": [
+          "CPUExecutionProvider"
+        ],
+        "model_meta": {
+          "producer_name": "pytorch",
+          "graph_name": "main_graph",
+          "domain": "",
+          "description": "",
+          "graph_description": "",
+          "version": 9223372036854775807,
+          "custom_metadata_map": {}
+        },
+        "inputs": [
+          {
+            "name": "enroll",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              48000
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "enroll_n",
+            "type": "tensor(float)",
+            "shape": [
+              257,
+              376
+            ]
+          },
+          {
+            "name": "k",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ]
+          },
+          {
+            "name": "v",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ]
+          }
+        ],
+        "dummy_input_shapes": {
+          "enroll": {
+            "shape": [
+              1,
+              48000
+            ],
+            "dtype": "float32"
+          }
+        },
+        "inference_ok": true,
+        "dummy_output_shapes": {
+          "enroll_n": {
+            "shape": [
+              257,
+              376
+            ],
+            "dtype": "float32"
+          },
+          "k": {
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ],
+            "dtype": "float32"
+          },
+          "v": {
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ],
+            "dtype": "float32"
+          }
+        }
+      },
+      "ort_cuda": {
+        "ort_version": "1.15.1",
+        "requested_providers": [
+          "CUDAExecutionProvider",
+          "CPUExecutionProvider"
+        ],
+        "session_ok": true,
+        "active_providers": [
+          "CUDAExecutionProvider",
+          "CPUExecutionProvider"
+        ],
+        "model_meta": {
+          "producer_name": "pytorch",
+          "graph_name": "main_graph",
+          "domain": "",
+          "description": "",
+          "graph_description": "",
+          "version": 9223372036854775807,
+          "custom_metadata_map": {}
+        },
+        "inputs": [
+          {
+            "name": "enroll",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              48000
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "enroll_n",
+            "type": "tensor(float)",
+            "shape": [
+              257,
+              376
+            ]
+          },
+          {
+            "name": "k",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ]
+          },
+          {
+            "name": "v",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ]
+          }
+        ],
+        "dummy_input_shapes": {
+          "enroll": {
+            "shape": [
+              1,
+              48000
+            ],
+            "dtype": "float32"
+          }
+        },
+        "inference_ok": true,
+        "dummy_output_shapes": {
+          "enroll_n": {
+            "shape": [
+              257,
+              376
+            ],
+            "dtype": "float32"
+          },
+          "k": {
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ],
+            "dtype": "float32"
+          },
+          "v": {
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ],
+            "dtype": "float32"
+          }
+        }
+      },
+      "ort_secondary_cpu": {
+        "ort_version": "1.15.1",
+        "requested_providers": [
+          "CPUExecutionProvider"
+        ],
+        "session_ok": true,
+        "active_providers": [
+          "CPUExecutionProvider"
+        ],
+        "model_meta": {
+          "producer_name": "pytorch",
+          "graph_name": "main_graph",
+          "domain": "",
+          "description": "",
+          "graph_description": "",
+          "version": 9223372036854775807,
+          "custom_metadata_map": {}
+        },
+        "inputs": [
+          {
+            "name": "enroll",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              48000
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "enroll_n",
+            "type": "tensor(float)",
+            "shape": [
+              257,
+              376
+            ]
+          },
+          {
+            "name": "k",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ]
+          },
+          {
+            "name": "v",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ]
+          }
+        ],
+        "dummy_input_shapes": {
+          "enroll": {
+            "shape": [
+              1,
+              48000
+            ],
+            "dtype": "float32"
+          }
+        },
+        "inference_ok": true,
+        "dummy_output_shapes": {
+          "enroll_n": {
+            "shape": [
+              257,
+              376
+            ],
+            "dtype": "float32"
+          },
+          "k": {
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ],
+            "dtype": "float32"
+          },
+          "v": {
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ],
+            "dtype": "float32"
+          }
+        }
+      }
+    },
+    {
+      "path": "Assets/Models/voxlock/v2/enroll_fp16.onnx",
+      "filename": "enroll_fp16.onnx",
+      "size_bytes": 10893975,
+      "sha256": "96515a725cf0466450a41c565887a07e8c0fb0c89f6bbfbc01214433029a2f6c",
+      "source": {
+        "source_repo": "https://huggingface.co/arbazsiddiqui/voxlock",
+        "remote_path": "onnx/v2/enroll_fp16.onnx"
+      },
+      "onnx_protobuf": {
+        "available": true,
+        "onnx_version": "1.14.0",
+        "ir_version": 8,
+        "producer_name": "pytorch",
+        "producer_version": "2.7.1",
+        "model_version": 0,
+        "opsets": [
+          {
+            "domain": "ai.onnx",
+            "version": 17
+          }
+        ],
+        "metadata_props": {},
+        "inputs": [
+          {
+            "name": "enroll",
+            "elem_type": "FLOAT",
+            "shape": [
+              1,
+              48000
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "enroll_n",
+            "elem_type": "FLOAT",
+            "shape": [
+              257,
+              376
+            ]
+          },
+          {
+            "name": "k",
+            "elem_type": "FLOAT",
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ]
+          },
+          {
+            "name": "v",
+            "elem_type": "FLOAT",
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ]
+          }
+        ],
+        "node_count": 374
+      },
+      "audio_params": {
+        "sample_rate": 16000,
+        "min_enroll_samples": 48000,
+        "min_enroll_seconds": 3.0,
+        "fbank_win_length_samples": 400,
+        "fbank_hop_length_samples": 160,
+        "fbank_num_mel_bins": 80,
+        "stft_n_fft": 512,
+        "stft_hop_length": 128,
+        "domain": "time_domain_pcm_float32"
+      },
+      "ort_cpu": {
+        "ort_version": "1.31.1",
+        "requested_providers": [
+          "CPUExecutionProvider"
+        ],
+        "session_ok": true,
+        "active_providers": [
+          "CPUExecutionProvider"
+        ],
+        "model_meta": {
+          "producer_name": "pytorch",
+          "graph_name": "main_graph",
+          "domain": "",
+          "description": "",
+          "graph_description": "",
+          "version": 9223372036854775807,
+          "custom_metadata_map": {}
+        },
+        "inputs": [
+          {
+            "name": "enroll",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              48000
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "enroll_n",
+            "type": "tensor(float)",
+            "shape": [
+              257,
+              376
+            ]
+          },
+          {
+            "name": "k",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ]
+          },
+          {
+            "name": "v",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ]
+          }
+        ],
+        "dummy_input_shapes": {
+          "enroll": {
+            "shape": [
+              1,
+              48000
+            ],
+            "dtype": "float32"
+          }
+        },
+        "inference_ok": true,
+        "dummy_output_shapes": {
+          "enroll_n": {
+            "shape": [
+              257,
+              376
+            ],
+            "dtype": "float32"
+          },
+          "k": {
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ],
+            "dtype": "float32"
+          },
+          "v": {
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ],
+            "dtype": "float32"
+          }
+        }
+      },
+      "ort_cuda": {
+        "ort_version": "1.15.1",
+        "requested_providers": [
+          "CUDAExecutionProvider",
+          "CPUExecutionProvider"
+        ],
+        "session_ok": true,
+        "active_providers": [
+          "CUDAExecutionProvider",
+          "CPUExecutionProvider"
+        ],
+        "model_meta": {
+          "producer_name": "pytorch",
+          "graph_name": "main_graph",
+          "domain": "",
+          "description": "",
+          "graph_description": "",
+          "version": 9223372036854775807,
+          "custom_metadata_map": {}
+        },
+        "inputs": [
+          {
+            "name": "enroll",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              48000
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "enroll_n",
+            "type": "tensor(float)",
+            "shape": [
+              257,
+              376
+            ]
+          },
+          {
+            "name": "k",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ]
+          },
+          {
+            "name": "v",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ]
+          }
+        ],
+        "dummy_input_shapes": {
+          "enroll": {
+            "shape": [
+              1,
+              48000
+            ],
+            "dtype": "float32"
+          }
+        },
+        "inference_ok": true,
+        "dummy_output_shapes": {
+          "enroll_n": {
+            "shape": [
+              257,
+              376
+            ],
+            "dtype": "float32"
+          },
+          "k": {
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ],
+            "dtype": "float32"
+          },
+          "v": {
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ],
+            "dtype": "float32"
+          }
+        }
+      },
+      "ort_secondary_cpu": {
+        "ort_version": "1.15.1",
+        "requested_providers": [
+          "CPUExecutionProvider"
+        ],
+        "session_ok": true,
+        "active_providers": [
+          "CPUExecutionProvider"
+        ],
+        "model_meta": {
+          "producer_name": "pytorch",
+          "graph_name": "main_graph",
+          "domain": "",
+          "description": "",
+          "graph_description": "",
+          "version": 9223372036854775807,
+          "custom_metadata_map": {}
+        },
+        "inputs": [
+          {
+            "name": "enroll",
+            "type": "tensor(float)",
+            "shape": [
+              1,
+              48000
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "enroll_n",
+            "type": "tensor(float)",
+            "shape": [
+              257,
+              376
+            ]
+          },
+          {
+            "name": "k",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ]
+          },
+          {
+            "name": "v",
+            "type": "tensor(float)",
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ]
+          }
+        ],
+        "dummy_input_shapes": {
+          "enroll": {
+            "shape": [
+              1,
+              48000
+            ],
+            "dtype": "float32"
+          }
+        },
+        "inference_ok": true,
+        "dummy_output_shapes": {
+          "enroll_n": {
+            "shape": [
+              257,
+              376
+            ],
+            "dtype": "float32"
+          },
+          "k": {
+            "shape": [
+              32,
+              2,
+              64,
+              298
+            ],
+            "dtype": "float32"
+          },
+          "v": {
+            "shape": [
+              32,
+              2,
+              298,
+              64
+            ],
+            "dtype": "float32"
+          }
+        }
+      }
+    }
+  ],
+  "secondary_cuda_onnx_env": {
+    "python_executable": "D:\\Software\\anaconda3\\envs\\fc\\python.exe",
+    "python_version": "3.11.14",
+    "onnxruntime_version": "1.15.1",
+    "available_providers": [
+      "TensorrtExecutionProvider",
+      "CUDAExecutionProvider",
+      "CPUExecutionProvider"
+    ]
+  }
+}
