@@ -74,7 +74,7 @@ To route processed audio into third-party voice, meeting, or recording applicati
 
 ```powershell
 # 1. Clone the repository
-git clone <your-repo-url> VoicierVoice
+git clone https://github.com/WoaShi/VoicierVoice.git
 cd VoicierVoice
 
 # 2. (Optional) Re-download and verify ONNX models and model_manifest.json

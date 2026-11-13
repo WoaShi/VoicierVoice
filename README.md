@@ -74,7 +74,7 @@
 
 ```powershell
 # 1. 克隆仓库
-git clone <your-repo-url> VoicierVoice
+git clone https://github.com/WoaShi/VoicierVoice.git
 cd VoicierVoice
 
 # 2. （可选）重新下载并校验 ONNX 模型与 model_manifest.json
