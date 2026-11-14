@@ -100,6 +100,35 @@
             </Grid>
         </Border>
 
+        <!-- Launch on Windows Startup Card -->
+        <Border Style="{StaticResource GallerySettingsRowStyle}" Margin="0,0,0,8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock FontFamily="{DynamicResource SymbolThemeFontFamily}"
+                               Text="&#xE7E8;"
+                               FontSize="16"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                               VerticalAlignment="Center"
+                               Margin="0,0,14,0" />
+                    <TextBlock Text="{Binding Source={x:Static loc:AppStrings.Current}, Path=LaunchOnStartupLabel}"
+                               FontSize="13.5"
+                               FontWeight="{Binding Source={x:Static loc:AppStrings.Current}, Path=StrongFontWeight}"
+                               VerticalAlignment="Center"
+                               Margin="0,0,6,0" />
+                    <controls:InfoHintBadge HintText="{Binding Source={x:Static loc:AppStrings.Current}, Path=LaunchOnStartupHint}" />
+                </StackPanel>
+
+                <CheckBox Grid.Column="1"
+                          Style="{StaticResource FluentToggleSwitchStyle}"
+                          IsChecked="{Binding LaunchOnStartupEnabled, Mode=TwoWay}" />
+            </Grid>
+        </Border>
+
         <!-- System & Tray Behavior Card -->
         <Border Style="{StaticResource GallerySettingsRowStyle}" Margin="0,0,0,18">
             <Grid>

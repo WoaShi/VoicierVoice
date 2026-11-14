@@ -244,11 +244,19 @@ public sealed class VoiceLockController : IDisposable
         _pipelineEngine.UpdateCpuAffinity(autoAffinityEnabled, selectedCoreMask, processorGroup);
     }
 
-    public void UpdateAppPreferences(AppLanguage language, AppThemePreference themePreference, bool minimizeToTrayEnabled)
+    public void UpdateAppPreferences(
+        AppLanguage language,
+        AppThemePreference themePreference,
+        bool minimizeToTrayEnabled,
+        bool? launchOnStartupEnabled = null)
     {
         _settings.Language = language;
         _settings.ThemePreference = themePreference;
         _settings.MinimizeToTrayEnabled = minimizeToTrayEnabled;
+        if (launchOnStartupEnabled.HasValue)
+        {
+            _settings.LaunchOnStartupEnabled = launchOnStartupEnabled.Value;
+        }
         _settings.Save();
     }
 

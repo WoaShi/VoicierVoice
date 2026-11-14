@@ -71,6 +71,7 @@ public sealed class AppSettings
     public AppLanguage Language { get; set; } = AppLanguage.ZhCn;
     public AppThemePreference ThemePreference { get; set; } = AppThemePreference.System;
     public bool MinimizeToTrayEnabled { get; set; } = true;
+    public bool LaunchOnStartupEnabled { get; set; }
 
     public static string GetAppDataDirectory() =>
         Path.Combine(
@@ -105,7 +106,8 @@ public sealed class AppSettings
         VoiceprintWavPath = VoiceprintWavPath,
         Language = Language,
         ThemePreference = ThemePreference,
-        MinimizeToTrayEnabled = MinimizeToTrayEnabled
+        MinimizeToTrayEnabled = MinimizeToTrayEnabled,
+        LaunchOnStartupEnabled = LaunchOnStartupEnabled
     };
 
     public static AppSettings Load(string? path = null)

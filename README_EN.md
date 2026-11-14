@@ -7,6 +7,8 @@
   </p>
 </div>
 
+> **Prerequisite**: To route processed voice output as a microphone into third-party voice, meeting, or streaming applications (such as Discord, Teams, Zoom, or OBS), VoicierVoice **depends on a virtual audio driver** such as [VB-Audio Virtual Cable](https://vb-audio.com/Cable/) or [VoiceMeeter](https://vb-audio.com/Voicemeeter/). Install a virtual audio device before routing audio between applications.
+
 ---
 
 ## Overview
@@ -20,13 +22,14 @@
   3. **VoxLock**: Target-speaker extraction conditioned on a local 5-second voiceprint embedding, supporting `INT8`, `INT8 Full`, and `FP16` model variants.
 - **WASAPI Audio Stream**: Uses timer-driven polling mode WASAPI Capture (25 ms) and WASAPI Render (45 ms), persistent streaming resamplers, a 54 ms output pre-buffer watermark, and a 64-sample linear crossfade on underrun/resume. Virtual audio endpoints such as VB-Cable and VoiceMeeter are automatically detected.
 - **Compute Backend & Core Affinity**: Supports CPU single-thread affinity locking and NVIDIA CUDA GPU acceleration. Automatically detects hybrid P-Core / E-Core topology and binds audio worker threads to efficiency cores (or tail cores on homogeneous CPUs), with optional manual core selection.
-- **Fluent 2 UI**: Supports System / Light / Dark themes synced with Windows 11 DWM Mica and caption bars, runtime Simplified Chinese / English switching, and minimize-to-tray background operation.
+- **Fluent 2 UI**: Supports System / Light / Dark themes synced with Windows 11 DWM Mica and caption bars, runtime Simplified Chinese / English switching, launch on Windows startup, and minimize-to-tray background operation.
 
 ---
 
 ## Dependencies & Acknowledgements
 
-### 1. Models & Core Engine
+### 1. Virtual Audio Driver & Neural Models
+- **Virtual Audio Driver (Required for inter-app audio routing)**: [VB-Audio Virtual Cable](https://vb-audio.com/Cable/) or [VoiceMeeter](https://vb-audio.com/Voicemeeter/)
 - **[VoxLock](https://github.com/arbazsiddiqui/voxlock)**: Core target-speaker extraction and voiceprint enrollment model (model weights from [`arbazsiddiqui/voxlock`](https://huggingface.co/arbazsiddiqui/voxlock): `enroll.onnx`, `enroll_fp16.onnx`, `chunk_int8.onnx`, `chunk_int8_full.onnx`, `chunk_fp16.onnx`).
 - **[Silero VAD](https://github.com/snakers4/silero-vad)**: Voice activity detection model (`silero_vad.onnx`).
 - **[GTCRN](https://github.com/Xiaobin-Rong/gtcrn)** / **[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)**: Streaming speech enhancement model (`gtcrn_simple.onnx`).
@@ -39,34 +42,45 @@
 | **NAudio** | `2.3.0` | WASAPI audio capture, resampling, and render | [naudio/NAudio](https://github.com/naudio/NAudio) |
 | **CommunityToolkit.Mvvm** | `8.4.2` | MVVM observable properties and commands | [CommunityToolkit/dotnet](https://github.com/CommunityToolkit/dotnet) |
 
-### 3. Requirements
-- **OS**: Windows 10 / Windows 11 (x64)
-- **Virtual Audio Device** (required when routing processed audio into communication or recording apps): [VB-Audio Virtual Cable](https://vb-audio.com/Cable/) or [VoiceMeeter](https://vb-audio.com/Voicemeeter/)
-- **GPU Acceleration (Optional)**: CUDA-capable NVIDIA GPU with compatible CUDA / cuDNN libraries; automatically falls back to CPU single-thread mode if unavailable
+### 3. System Requirements
+- **OS**: Windows 10 / Windows 11 (64-bit)
+- **Self-Contained Releases**: Pre-built GitHub Release archives bundle the .NET 10 Desktop Runtime and required managed/native libraries with no external runtime install needed. GPU acceleration requires a CUDA-capable NVIDIA GPU and compatible CUDA / cuDNN environment (falls back to CPU mode if unavailable).
 
 ---
 
 ## Usage Guide
 
-### 1. Configure a Virtual Audio Cable (Optional)
-To route processed audio into third-party voice, meeting, or recording applications:
-1. Install a virtual audio driver such as VB-Cable or VoiceMeeter.
-2. In VoicierVoice (**Home** tab), select the virtual cable input as the output device (e.g., `CABLE Input` or `VoiceMeeter Input`).
-3. In your communication or recording software, select the corresponding virtual output endpoint as the microphone (e.g., `CABLE Output` or `VoiceMeeter Out`).
+### Step 1: Install a Virtual Audio Cable and Configure Devices
+1. Install a virtual audio driver such as **VB-Cable** or **VoiceMeeter**.
+2. Open the **Home** tab in VoicierVoice and scroll to **Audio Routing & Cascade Pipeline**:
+   - **Input Microphone**: Select your physical microphone.
+   - **Output Device**: Select the virtual audio input endpoint (e.g., `CABLE Input (VB-Audio Virtual Cable)` or `VoiceMeeter Input`).
+3. In your communication or recording software (e.g., Discord, Teams, OBS), select the corresponding virtual output endpoint as the microphone (e.g., `CABLE Output` or `VoiceMeeter Out`).
 
 > Note: Keep "Monitor Own Voice" disabled when outputting to a virtual audio device to avoid hearing loopback echo.
 
-### 2. Basic Workflow
-1. **Select Devices**: On the **Home** tab, choose your physical input microphone and target output device.
-2. **Enroll Voiceprint**: Switch to the **Voiceprint** tab, click **Record Voiceprint** in a quiet environment, and read the 5-second prompt aloud to build a local embedding cache (stored under `%LocalAppData%\VoicierVoice`).
-3. **Start Pipeline**: Toggle **Live Voice Isolation** in the top-right header. The status kaomoji reflects the current pipeline state:
-   - `( • vv • )`: Stopped / Standby
-   - `d( • vv • )b`: Running, currently in VAD silent sleep
-   - `d( ^ ∀ ^ )b`: Running, actively isolating target speech
+![Configure physical microphone input and virtual audio cable output](docs/images/en-home-routing.png)
 
-### 3. Compute & Preferences
-- **CPU&GPU**: Switch between **CPU Single-Thread Lock** and **CUDA GPU Acceleration**, and configure automatic efficiency-core locking or custom CPU core affinity.
-- **Other Settings**: Change theme preference (System / Light / Dark), interface language (Simplified Chinese / English), and minimize-to-tray behavior.
+### Step 2: Enroll a 5-Second Personal Voiceprint
+1. Switch to the **Voiceprint** tab in the left navigation rail.
+2. In a quiet room, click **Record Voiceprint** and read the prompt text aloud for 5 seconds.
+3. A local voiceprint embedding cache is generated automatically under `%LocalAppData%\VoicierVoice` (accessible via the folder button in the top right of the card).
+
+![Record 5-second personal voiceprint sample](docs/images/en-voiceprint.png)
+
+### Step 3: Enable Live Voice Isolation
+Toggle **Live Voice Isolation** in the top-right header to start real-time processing. The status kaomoji reflects the current pipeline state:
+- `( • vv • )`: Stopped / Standby
+- `d( • vv • )b`: Running, currently in VAD silent sleep
+- `d( ^ ∀ ^ )b`: Running, actively isolating target speech
+
+![Home overview and master switch](docs/images/en-home-hero.png)
+
+### Step 4: Compute Backend & System Settings
+- **CPU&GPU**: **CPU Single-Thread Lock** with automatic efficiency-core binding avoids GPU contention during 3D games; **CUDA GPU Acceleration** enables GPU inference and `FP16` usage.
+- **Other Settings**: Configure theme preference (System / Light / Dark), interface language (Simplified Chinese / English), **Launch on Windows Startup** (starts minimized on logon), and **Minimize to System Tray on Close**.
+
+![Compute backend and core affinity configuration](docs/images/en-compute.png)
 
 ---
 
@@ -96,7 +110,7 @@ dotnet run --project VoicierVoice.csproj -c Release
 
 ```powershell
 # Generate self-contained single-file release zips (win-x64 and win-arm64) and SHA256SUMS.txt under dist/
-powershell -ExecutionPolicy Bypass -File scripts/build_releases.ps1 -Version 1.0.0
+powershell -ExecutionPolicy Bypass -File scripts/build_releases.ps1 -Version 1.0.1
 ```
 
 - `win-x64`: Bundles .NET 10 Desktop Runtime and `Microsoft.ML.OnnxRuntime.Gpu` (supports both CPU and NVIDIA CUDA GPU acceleration).

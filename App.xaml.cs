@@ -56,7 +56,19 @@ public partial class App : Application
         _mainWindow.Closing += OnMainWindowClosing;
 
         MainWindow = _mainWindow;
-        _mainWindow.Show();
+        bool startMinimized = HasArgument(e.Args, "--minimized");
+        if (startMinimized && _viewModel.MinimizeToTrayEnabled)
+        {
+            // Keep hidden in tray on Windows logon autostart when minimize-to-tray is enabled.
+        }
+        else
+        {
+            if (startMinimized)
+            {
+                _mainWindow.WindowState = WindowState.Minimized;
+            }
+            _mainWindow.Show();
+        }
 
         _trayIconService.UpdateStatus(_viewModel.StatusBadgeText, _viewModel.IsPipelineRunning);
 
@@ -180,12 +192,17 @@ public partial class App : Application
 
     private static bool IsSelfTestRequested(string[] args)
     {
+        return HasArgument(args, "--self-test") ||
+               HasArgument(args, "/selftest") ||
+               HasArgument(args, "--self-test-ui") ||
+               HasArgument(args, "/selftest-ui");
+    }
+
+    private static bool HasArgument(string[] args, string flag)
+    {
         foreach (string arg in args)
         {
-            if (string.Equals(arg, "--self-test", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(arg, "/selftest", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(arg, "--self-test-ui", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(arg, "/selftest-ui", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(arg, flag, StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }

@@ -7,6 +7,8 @@
   </p>
 </div>
 
+> **前提说明**：将处理后的音频接入 Discord、腾讯会议、OBS 或游戏内置语音等第三方软件时，本软件**依赖虚拟声卡**（如 [VB-Audio Virtual Cable](https://vb-audio.com/Cable/) 或 [VoiceMeeter](https://vb-audio.com/Voicemeeter/)）作为中间音频路由设备。请在使用前先完成虚拟声卡驱动的安装。
+
 ---
 
 ## 简介
@@ -20,13 +22,14 @@
   3. **VoxLock**：依据本地 5 秒参考声纹进行目标人声提取，支持 `INT8`、`INT8 Full`、`FP16` 三种模型变体。
 - **WASAPI 音频流**：采用定时器轮询模式 WASAPI Capture（25 ms）与 WASAPI Render（45 ms），配置常驻流式重采样器、54 ms 起播预缓冲水位线以及 64 采样点线性淡入淡出过渡，并自动识别 VB-Cable、VoiceMeeter 等虚拟声卡端点。
 - **算力后端与核心调度**：支持 CPU 单线程锁核与 NVIDIA CUDA GPU 加速；在异构 CPU 上可自动识别 P-Core / E-Core 并绑定至能效核（均质 CPU 绑定尾部物理核），也支持手动配置核心亲和性掩码。
-- **Fluent 2 界面**：支持跟随系统 / 浅色 / 深色主题（同步 Win11 DWM Mica 与标题栏外观）、简体中文 / English 实时切换，以及关闭窗口时最小化至系统托盘运行。
+- **Fluent 2 界面**：支持跟随系统 / 浅色 / 深色主题（同步 Win11 DWM Mica 与标题栏外观）、简体中文 / English 实时切换、开机自动启动以及关闭窗口时最小化至系统托盘运行。
 
 ---
 
 ## 依赖与致谢
 
-### 1. 模型与核心引擎
+### 1. 音频驱动与核心模型
+- **虚拟声卡驱动（必需，用于软件间音频路由）**：[VB-Audio Virtual Cable](https://vb-audio.com/Cable/) 或 [VoiceMeeter](https://vb-audio.com/Voicemeeter/)
 - **[VoxLock](https://github.com/arbazsiddiqui/voxlock)**：目标人声提取与声纹嵌入模型核心（模型文件来源：[`arbazsiddiqui/voxlock`](https://huggingface.co/arbazsiddiqui/voxlock)，包含 `enroll.onnx`、`enroll_fp16.onnx`、`chunk_int8.onnx`、`chunk_int8_full.onnx`、`chunk_fp16.onnx`）。
 - **[Silero VAD](https://github.com/snakers4/silero-vad)**：语音活动检测模型（`silero_vad.onnx`）。
 - **[GTCRN](https://github.com/Xiaobin-Rong/gtcrn)** / **[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)**：流式语音增强模型（`gtcrn_simple.onnx`）。
@@ -39,34 +42,45 @@
 | **NAudio** | `2.3.0` | WASAPI 音频采集、重采样与渲染 | [naudio/NAudio](https://github.com/naudio/NAudio) |
 | **CommunityToolkit.Mvvm** | `8.4.2` | MVVM 数据绑定与命令支持 | [CommunityToolkit/dotnet](https://github.com/CommunityToolkit/dotnet) |
 
-### 3. 环境要求
-- **操作系统**：Windows 10 / Windows 11（x64）
-- **虚拟声卡**（将输出音频路由至通话或录制软件时使用）：支持 [VB-Audio Virtual Cable](https://vb-audio.com/Cable/) 或 [VoiceMeeter](https://vb-audio.com/Voicemeeter/)
-- **GPU 加速（可选）**：支持 CUDA 的 NVIDIA 显卡及对应 CUDA / cuDNN 运行环境；CUDA 不可用时自动回退至 CPU 单线程模式
+### 3. 系统环境要求
+- **操作系统**：Windows 10 / Windows 11（64 位）
+- **自包含分发说明**：GitHub Releases 提供的压缩包已内含 .NET 10 运行时与依赖库，解压即可运行；仅在使用 CUDA GPU 加速时需要本机具备支持 CUDA 的 NVIDIA 显卡及 CUDA / cuDNN 运行环境（不可用时自动回退 CPU 模式）。
 
 ---
 
 ## 使用说明
 
-### 1. 配置虚拟声卡（可选）
-如需将处理后的音频接入第三方通话、会议或录制软件：
-1. 安装虚拟声卡驱动（如 VB-Cable 或 VoiceMeeter）。
-2. 在 VoicierVoice 主页的输出设备中选择虚拟声卡输入端（如 `CABLE Input` 或 `VoiceMeeter Input`）。
-3. 在通话或录制软件中将麦克风设为对应的虚拟声卡输出端（如 `CABLE Output` 或 `VoiceMeeter Out`）。
+### 第一步：安装并配置虚拟声卡与输入输出设备
+1. 安装虚拟声卡驱动（推荐 **VB-Cable** 或 **VoiceMeeter**）。
+2. 打开 VoicierVoice **主页**，向下滚动至「音频路由与级联降噪管线」：
+   - **输入麦克风**：选择你的物理麦克风设备。
+   - **输出设备**：选择虚拟声卡输入端（如 `CABLE Input (VB-Audio Virtual Cable)` 或 `VoiceMeeter Input`）。
+3. 在你的通话或录制软件（如 Discord、腾讯会议、OBS）中，将麦克风设备设置为对应的虚拟声卡输出端（如 `CABLE Output` 或 `VoiceMeeter Out`）。
 
 > 注：向虚拟声卡输出时，建议关闭「实时监听自己声音」以避免音频回声。
 
-### 2. 基本操作流程
-1. **选择设备**：在 **主页** 选择物理输入麦克风与输出设备。
-2. **录制声纹**：切换至 **声纹** 页面，在安静环境中点击「录制我的声纹」，按引导文本朗读 5 秒后在本地生成声纹特征缓存（默认存储于 `%LocalAppData%\VoicierVoice`）。
-3. **开启管线**：打开右上角 **实时声纹提取** 开关。顶部状态指示会随当前处理状态切换：
-   - `( • vv • )`：已停止 / 待机
-   - `d( • vv • )b`：管线运行中，当前处于静音休眠状态
-   - `d( ^ ∀ ^ )b`：管线运行中，当前正在处理人声输入
+![选择物理输入麦克风与虚拟声卡输出设备](docs/images/zh-home-routing.png)
 
-### 3. 算力与外观配置
-- **CPU&GPU**：可在 **CPU 单线程锁核** 与 **CUDA GPU 加速** 之间切换，并配置自动绑定能效核或自定义核心亲和性矩阵。
-- **其他设置**：可切换界面主题（跟随系统 / 浅色 / 深色）、界面语言（简体中文 / English）以及关闭窗口时最小化至系统托盘。
+### 第二步：录制 5 秒个人声纹
+1. 切换至左侧导航栏的 **声纹** 页面。
+2. 在相对安静的环境中点击 **录制我的声纹**，按上方引导文本自然朗读 5 秒。
+3. 录制完成后会自动生成本地声纹特征缓存（存储于 `%LocalAppData%\VoicierVoice`，可通过右上角文件夹图标打开）。
+
+![录制 5 秒个人声纹样本](docs/images/zh-voiceprint.png)
+
+### 第三步：开启实时声纹提取
+点击右上角 **实时声纹提取** 开关即可开始处理。顶部状态颜文字会随管线运行状态动态变化：
+- `( • vv • )`：已停止 / 待机
+- `d( • vv • )b`：管线运行中，当前处于静音休眠状态
+- `d( ^ ∀ ^ )b`：管线运行中，当前正在处理人声输入
+
+![主页概览与实时声纹提取开关](docs/images/zh-home-hero.png)
+
+### 第四步：算力调度与系统设置
+- **CPU&GPU**：游戏等高 GPU 负载场景推荐使用 **CPU 单线程锁核** 并开启自动绑定能效核；需启用 `FP16` 或 GPU 推理时可切换至 **CUDA GPU 加速**。
+- **其他设置**：支持切换 **跟随系统 / 浅色 / 深色** 主题、**简体中文 / English** 双语界面、**开机自动启动**（登录 Windows 后后台静默启动）以及 **关闭窗口时最小化到系统托盘**。
+
+![其他设置与开机自启动选项](docs/images/zh-other-settings.png)
 
 ---
 
@@ -96,7 +110,7 @@ dotnet run --project VoicierVoice.csproj -c Release
 
 ```powershell
 # 在 dist/ 下生成自包含单文件 Release 压缩包（默认 win-x64 与 win-arm64）及 SHA256SUMS.txt
-powershell -ExecutionPolicy Bypass -File scripts/build_releases.ps1 -Version 1.0.0
+powershell -ExecutionPolicy Bypass -File scripts/build_releases.ps1 -Version 1.0.1
 ```
 
 - `win-x64`：内置 .NET 10 桌面运行时与 `Microsoft.ML.OnnxRuntime.Gpu`，支持 CPU 与 NVIDIA CUDA GPU 加速。

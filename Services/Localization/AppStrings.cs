@@ -250,6 +250,11 @@ public sealed class AppStrings : ObservableObject
         "关闭主窗口后保持后台实时降噪运行，可通过右下角托盘图标随时打开窗口或彻底退出。",
         "Keeps background processing alive in the system tray when closed; reopen or exit from the tray icon.");
 
+    public string LaunchOnStartupLabel => L("开机自动启动", "Launch on Windows Startup");
+    public string LaunchOnStartupHint => L(
+        "Windows 登录后自动在后台启动 VoicierVoice。",
+        "Automatically start VoicierVoice minimized when signing in to Windows.");
+
     public string AppDataPathLabel => L("本地数据目录", "Local Data Directory");
     public string ExitApplicationButton => L("退出程序", "Exit VoicierVoice");
 

@@ -261,6 +261,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private bool _minimizeToTrayEnabled = true;
 
     [ObservableProperty]
+    private bool _launchOnStartupEnabled;
+
+    [ObservableProperty]
     private bool _isDarkThemeActive;
 
     public MainViewModel()
@@ -564,7 +567,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         AppStrings.Current.SetLanguage(value);
-        _controller.UpdateAppPreferences(value, SelectedThemePreference, MinimizeToTrayEnabled);
+        _controller.UpdateAppPreferences(value, SelectedThemePreference, MinimizeToTrayEnabled, LaunchOnStartupEnabled);
     }
 
     partial void OnSelectedThemePreferenceChanged(AppThemePreference value)
@@ -575,7 +578,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         DwmBackdropHelper.ApplyThemePreference(value);
-        _controller.UpdateAppPreferences(SelectedLanguage, value, MinimizeToTrayEnabled);
+        _controller.UpdateAppPreferences(SelectedLanguage, value, MinimizeToTrayEnabled, LaunchOnStartupEnabled);
     }
 
     partial void OnMinimizeToTrayEnabledChanged(bool value)
@@ -585,7 +588,33 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        _controller.UpdateAppPreferences(SelectedLanguage, SelectedThemePreference, value);
+        _controller.UpdateAppPreferences(SelectedLanguage, SelectedThemePreference, value, LaunchOnStartupEnabled);
+    }
+
+    partial void OnLaunchOnStartupEnabledChanged(bool value)
+    {
+        if (_isHydrating)
+        {
+            return;
+        }
+
+        if (!WindowsStartupService.SetStartupEnabled(value))
+        {
+            bool prev = _isHydrating;
+            _isHydrating = true;
+            try
+            {
+                LaunchOnStartupEnabled = WindowsStartupService.IsStartupEnabled();
+            }
+            finally
+            {
+                _isHydrating = prev;
+            }
+
+            return;
+        }
+
+        _controller.UpdateAppPreferences(SelectedLanguage, SelectedThemePreference, MinimizeToTrayEnabled, value);
     }
 
     [RelayCommand]
@@ -1009,6 +1038,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             SelectedLanguage = settings.Language;
             SelectedThemePreference = settings.ThemePreference;
             MinimizeToTrayEnabled = settings.MinimizeToTrayEnabled;
+            LaunchOnStartupEnabled = WindowsStartupService.IsStartupEnabled();
             IsDarkThemeActive = DwmBackdropHelper.IsDarkThemeActive();
 
             CpuTopologyInfo topology = _controller.CpuTopology;
