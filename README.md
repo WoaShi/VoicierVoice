@@ -30,7 +30,7 @@
 
 ### 1. 音频驱动与核心模型
 - **虚拟声卡驱动（必需，用于软件间音频路由）**：[VB-Audio Virtual Cable](https://vb-audio.com/Cable/) 或 [VoiceMeeter](https://vb-audio.com/Voicemeeter/)
-- **[VoxLock](https://github.com/arbazsiddiqui/voxlock)**：目标人声提取与声纹嵌入模型核心（模型文件来源：[`arbazsiddiqui/voxlock`](https://huggingface.co/arbazsiddiqui/voxlock)，包含 `enroll.onnx`、`enroll_fp16.onnx`、`chunk_int8.onnx`、`chunk_int8_full.onnx`、`chunk_fp16.onnx`）。
+- **[VoxLock](https://github.com/arbazsiddiqui/voxlock)**：目标人声提取与声纹嵌入模型核心（模型文件来源：[`arbazsiddiqui/voxlock`](https://huggingface.co/arbazsiddiqui/voxlock)，包含 `enroll.onnx`、`enroll_fp16.onnx`、`chunk_int8.onnx`、`chunk_int8_full.onnx`、`chunk_fp16.onnx`）。引用论文：Siddiqui, A. (2026). *VoxLock: Target-Speaker Extraction for Voice Agents Without an Enrollment Step*. arXiv preprint. <https://arxiv.org/abs/2610.40727>（详见 [CITATION.cff](CITATION.cff)）。
 - **[Silero VAD](https://github.com/snakers4/silero-vad)**：语音活动检测模型（`silero_vad.onnx`）。
 - **[GTCRN](https://github.com/Xiaobin-Rong/gtcrn)** / **[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)**：流式语音增强模型（`gtcrn_simple.onnx`）。
 

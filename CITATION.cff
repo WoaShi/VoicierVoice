@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+message: "If you use VoicierVoice in your work, please cite this repository and the underlying VoxLock work."
+title: "VoicierVoice"
+version: "1.0.1"
+date-released: 2026-11-14
+authors:
+  - name: "WoaShi"
+license: Apache-2.0
+repository-code: "https://github.com/WoaShi/VoicierVoice"
+url: "https://github.com/WoaShi/VoicierVoice"
+references:
+  - type: article
+    title: "VoxLock: Target-Speaker Extraction for Voice Agents Without an Enrollment Step"
+    authors:
+      - family-names: Siddiqui
+        given-names: Arbaz
+    year: 2026
+    journal: "arXiv preprint"
+    identifiers:
+      - type: other
+        value: "arXiv:2610.40727"
+    url: "https://arxiv.org/abs/2610.40727"
+  - type: software
+    title: "VoxLock"
+    authors:
+      - family-names: Siddiqui
+        given-names: Arbaz
+    license: Apache-2.0
+    repository-code: "https://github.com/arbazsiddiqui/voxlock"
+    url: "https://huggingface.co/arbazsiddiqui/voxlock"

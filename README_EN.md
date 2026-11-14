@@ -30,7 +30,7 @@
 
 ### 1. Virtual Audio Driver & Neural Models
 - **Virtual Audio Driver (Required for inter-app audio routing)**: [VB-Audio Virtual Cable](https://vb-audio.com/Cable/) or [VoiceMeeter](https://vb-audio.com/Voicemeeter/)
-- **[VoxLock](https://github.com/arbazsiddiqui/voxlock)**: Core target-speaker extraction and voiceprint enrollment model (model weights from [`arbazsiddiqui/voxlock`](https://huggingface.co/arbazsiddiqui/voxlock): `enroll.onnx`, `enroll_fp16.onnx`, `chunk_int8.onnx`, `chunk_int8_full.onnx`, `chunk_fp16.onnx`).
+- **[VoxLock](https://github.com/arbazsiddiqui/voxlock)**: Core target-speaker extraction and voiceprint enrollment model (model weights from [`arbazsiddiqui/voxlock`](https://huggingface.co/arbazsiddiqui/voxlock): `enroll.onnx`, `enroll_fp16.onnx`, `chunk_int8.onnx`, `chunk_int8_full.onnx`, `chunk_fp16.onnx`). Reference: Siddiqui, A. (2026). *VoxLock: Target-Speaker Extraction for Voice Agents Without an Enrollment Step*. arXiv preprint. <https://arxiv.org/abs/2610.40727> (see [CITATION.cff](CITATION.cff)).
 - **[Silero VAD](https://github.com/snakers4/silero-vad)**: Voice activity detection model (`silero_vad.onnx`).
 - **[GTCRN](https://github.com/Xiaobin-Rong/gtcrn)** / **[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)**: Streaming speech enhancement model (`gtcrn_simple.onnx`).
 
