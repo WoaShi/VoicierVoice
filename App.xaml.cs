@@ -1,5 +1,7 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Windows;
+using Microsoft.ML.OnnxRuntime;
 using VoiceLockStudio.Services;
 using VoiceLockStudio.Services.Localization;
 using VoiceLockStudio.Services.System;
@@ -187,7 +189,25 @@ public partial class App : Application
         GC.Collect();
         GC.WaitForPendingFinalizers();
 
+        if (NativeMethods.GetModuleHandleW("onnxruntime.dll") != IntPtr.Zero)
+        {
+            try
+            {
+                OrtEnv.Instance().Dispose();
+            }
+            catch
+            {
+                // Best-effort native OrtEnv teardown before process exit.
+            }
+        }
+
         base.OnExit(e);
+    }
+
+    private static class NativeMethods
+    {
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+        public static extern IntPtr GetModuleHandleW(string lpModuleName);
     }
 
     private static bool IsSelfTestRequested(string[] args)

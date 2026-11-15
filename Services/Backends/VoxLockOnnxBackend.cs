@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.ML.OnnxRuntime;
+using Microsoft.ML.OnnxRuntime.Tensors;
 using NAudio.Wave;
 using VoiceLockStudio.Models;
 using VoiceLockStudio.Services.Audio;
@@ -15,17 +16,18 @@ namespace VoiceLockStudio.Services.Backends;
 /// <summary>
 /// Target-speaker voice isolation backend powered by VoxLock v2 ONNX models.
 /// Encapsulates all VoxLock model selection, enrollment, binary voiceprint caching,
-/// reflect-padded STFT chunking (<c>K = 4</c>, <c>S = 896</c>, 32 ms chunk / 24 ms overlap),
-/// and squared-Hann OLA synthesis strictly from <see cref="ModelManifest"/>.
+/// STFT chunking (<c>K = 2</c> / 16 ms or <c>K = 4</c> / 32 ms),
+/// squared-Hann OLA synthesis strictly from <see cref="ModelManifest"/>, and optional CUDA IO binding.
 /// </summary>
 public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
 {
-    private const int HopsPerChunk = 4; // K = 4 -> FrameSizeSamples = 512 (32 ms @ 16 kHz, 2x GTCRN hops), S = 896
+    private const int DefaultHopsPerChunk = 4; // K = 4 -> 512 samples (32 ms @ 16 kHz); K = 2 -> 256 samples (16 ms)
     private const int MaxEnrollSearchSeconds = 30;
     private const string CacheMagic = "VXLCACH2";
     private const uint CacheFormatVersion = 1;
 
     private readonly object _lifecycleLock = new();
+    private readonly object _inferenceLock = new(); // Always acquire _lifecycleLock before _inferenceLock.
 
     private ModelManifest? _manifest;
     private string _modelsRootDirectory = AppContext.BaseDirectory;
@@ -42,20 +44,20 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
     private int _sampleRate = 16000;
     private int _nFft = 512;
     private int _hopLength = 128;
+    private int _overlapSamples = 384;    // nFft - hop
+    private int _hopsPerChunk = DefaultHopsPerChunk;
     private int _reflectPadSamples = 256;
     private int _chunkInputSamples = 896; // S = nFft + (K - 1) * hop
     private int _doneSamples = 512;       // K * hop
     private float _outputGain = -0.5f;
+    private float _olaSumNorm = 1.5f;
     private double _algorithmicLatencyMs = 24.0;
 
     // Precomputed OLA window (periodic Hann squared) and streaming buffers
     private float[] _win2 = [];
     private float[] _inBuf = [];
     private int _inLen;
-    private bool _didStartupPad;
-    private int _droppedRemaining;
     private float[] _olaBuffer = [];
-    private float[] _envBuffer = [];
 
     // Preallocated ONNX I/O buffers and pinned OrtValues for chunk inference
     private float[] _wavBuffer = [];
@@ -71,6 +73,8 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
     private long[] _enrollNShape = [];
     private long[] _kShape = [];
     private long[] _vShape = [];
+    private long[] _hShape = [];
+    private long[] _cShape = [];
 
     private OrtValue? _ortWav;
     private OrtValue? _ortEnrollN;
@@ -82,6 +86,28 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
     private OrtValue? _ortCB;
     private OrtValue? _ortFrames;
 
+    private string _wavInputName = string.Empty;
+    private string _enrollNInputName = string.Empty;
+    private string _kInputName = string.Empty;
+    private string _vInputName = string.Empty;
+    private string _hInputName = string.Empty;
+    private string _cInputName = string.Empty;
+    private string _framesOutputName = string.Empty;
+    private string _hOutputName = string.Empty;
+    private string _cOutputName = string.Empty;
+
+    private OrtMemoryInfo? _cudaMemInfo;
+    private OrtAllocator? _cudaAllocator;
+    private OrtValue? _cudaHA;
+    private OrtValue? _cudaHB;
+    private OrtValue? _cudaCA;
+    private OrtValue? _cudaCB;
+    private OrtIoBinding? _ioBindingReset;
+    private OrtIoBinding? _ioBindingA;
+    private OrtIoBinding? _ioBindingB;
+    private bool _useCudaIoBinding;
+    private bool _needsCudaStateInit = true;
+
     private string[] _inputNames = [];
     private OrtValue[] _inputValues = [];
     private string[] _outputNames = [];
@@ -91,6 +117,10 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
     private int _hOutputSlot;
     private int _cOutputSlot;
     private bool _stateIsA = true;
+
+    private List<int> _ortWorkerThreadIds = [];
+    private ulong _lastBoundCoreMask;
+    private ushort _lastBoundProcessorGroup;
 
     private VoiceprintProfileInfo? _currentVoiceprint;
     private bool _hasEnrolledVoiceprint;
@@ -145,11 +175,13 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
             _outputGain = (float)(audio.OutputGainMultiplier ?? -0.5);
             _algorithmicLatencyMs = audio.AlgorithmicLatencyMs ?? 24.0;
 
-            _doneSamples = HopsPerChunk * _hopLength;
-            _chunkInputSamples = _nFft + (HopsPerChunk - 1) * _hopLength;
+            _hopsPerChunk = options.VoxLockHopsPerChunk == 2 ? 2 : DefaultHopsPerChunk;
+            _overlapSamples = Math.Max(0, _nFft - _hopLength);
+            _doneSamples = _hopsPerChunk * _hopLength;
+            _chunkInputSamples = _nFft + (_hopsPerChunk - 1) * _hopLength;
 
             int intraOpThreads = ResolveIntraOpThreads(options);
-            HashSet<int>? baselineThreads = (options.Backend == ComputeBackend.Cpu && options.CpuAffinityMask != 0 && intraOpThreads > 1)
+            HashSet<int>? baselineThreads = (options.Backend == ComputeBackend.Cpu && intraOpThreads > 1)
                 ? CpuAffinityManager.CaptureCurrentOsThreadIds()
                 : null;
 
@@ -162,17 +194,16 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
 
             BuildPeriodicHannSquaredWindow(_nFft, audio.WindowType);
 
-            _inBuf = GC.AllocateArray<float>(_reflectPadSamples + _chunkInputSamples + _doneSamples, pinned: true);
+            _inBuf = GC.AllocateArray<float>(_chunkInputSamples + _doneSamples, pinned: true);
             _olaBuffer = GC.AllocateArray<float>(_nFft + _doneSamples, pinned: true);
-            _envBuffer = GC.AllocateArray<float>(_nFft + _doneSamples, pinned: true);
 
             AllocateChunkTensors(_chunkEntry, _enrollEntry);
 
             _runOptions = new RunOptions();
-            _inLen = 0;
-            _didStartupPad = false;
-            _droppedRemaining = 0;
+            _inLen = _overlapSamples;
             _stateIsA = true;
+            _needsCudaStateInit = true;
+            _useCudaIoBinding = _chunkSessionResult.ActiveBackend == ComputeBackend.Cuda && TryInitializeCudaIoBindings();
             Volatile.Write(ref _hasEnrolledVoiceprint, false);
             Volatile.Write(ref _currentVoiceprint, null);
             Volatile.Write(ref _isInitialized, true);
@@ -180,12 +211,18 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
             // Warm up chunk session immediately so lazy ORT arenas/threads are initialized before audio capture starts.
             WarmupCore();
 
-            if (baselineThreads is not null && options.CpuAffinityMask != 0)
+            if (baselineThreads is not null)
             {
-                new CpuAffinityManager().BindNewProcessThreads(
-                    baselineThreads,
-                    options.CpuAffinityMask,
-                    options.ProcessorGroup);
+                _ortWorkerThreadIds = CpuAffinityManager.GetNewProcessThreadIds(baselineThreads, intraOpThreads);
+                if (options.CpuAffinityMask != 0 && _ortWorkerThreadIds.Count > 0)
+                {
+                    new CpuAffinityManager().BindSpecificThreads(
+                        _ortWorkerThreadIds,
+                        options.CpuAffinityMask,
+                        options.ProcessorGroup);
+                    _lastBoundCoreMask = options.CpuAffinityMask;
+                    _lastBoundProcessorGroup = options.ProcessorGroup;
+                }
             }
 
             // Auto-load or rebuild cached voiceprint if the default raw voice WAV already exists.
@@ -270,156 +307,127 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
             throw new ArgumentException($"Expected {_doneSamples} output samples, got {output.Length}.", nameof(output));
         }
 
-        if (!Volatile.Read(ref _hasEnrolledVoiceprint))
+        lock (_inferenceLock)
         {
-            if (!Unsafe.AreSame(
-                ref MemoryMarshal.GetReference(input),
-                ref MemoryMarshal.GetReference(output)))
-            {
-                input.CopyTo(output);
-            }
-            return;
-        }
-
-        input.CopyTo(_inBuf.AsSpan(_inLen, _doneSamples));
-        _inLen += _doneSamples;
-
-        if (!_didStartupPad)
-        {
-            if (_inLen <= _reflectPadSamples)
+            if (_disposed || !Volatile.Read(ref _isInitialized) || _chunkSessionResult is null || _runOptions is null)
             {
                 output.Clear();
                 return;
             }
 
-            // Prepend 256-sample reflect pad: head[1..256] reversed before head[0].
-            _inBuf.AsSpan(0, _inLen).CopyTo(_inBuf.AsSpan(_reflectPadSamples, _inLen));
-            for (int p = 0; p < _reflectPadSamples; p++)
+            if (!Volatile.Read(ref _hasEnrolledVoiceprint))
             {
-                _inBuf[p] = _inBuf[_reflectPadSamples + (_reflectPadSamples - p)];
-            }
-
-            _inLen += _reflectPadSamples;
-            _didStartupPad = true;
-            _droppedRemaining = _reflectPadSamples;
-        }
-
-        bool emittedOutput = false;
-        while (_inLen >= _chunkInputSamples)
-        {
-            _inBuf.AsSpan(0, _chunkInputSamples).CopyTo(_wavBuffer);
-
-            int remainingIn = _inLen - _doneSamples;
-            if (remainingIn > 0)
-            {
-                _inBuf.AsSpan(_doneSamples, remainingIn).CopyTo(_inBuf.AsSpan(0, remainingIn));
-            }
-            _inLen = remainingIn;
-
-            _chunkSessionResult.Session.Run(_runOptions, _inputNames, _inputValues, _outputNames, _outputValues);
-
-            _stateIsA = !_stateIsA;
-            if (_stateIsA)
-            {
-                _inputValues[_hInputSlot] = _ortHA!;
-                _inputValues[_cInputSlot] = _ortCA!;
-                _outputValues[_hOutputSlot] = _ortHB!;
-                _outputValues[_cOutputSlot] = _ortCB!;
-            }
-            else
-            {
-                _inputValues[_hInputSlot] = _ortHB!;
-                _inputValues[_cInputSlot] = _ortCB!;
-                _outputValues[_hOutputSlot] = _ortHA!;
-                _outputValues[_cOutputSlot] = _ortCA!;
-            }
-
-            // Overlap-add K = 2 frames of length nFft (512) at stride hopLength (128).
-            float[] frames = _framesBuffer;
-            float[] ola = _olaBuffer;
-            float[] env = _envBuffer;
-            float[] win2 = _win2;
-            int nFft = _nFft;
-            int hop = _hopLength;
-
-            for (int f = 0; f < HopsPerChunk; f++)
-            {
-                int srcOffset = f * nFft;
-                int dstOffset = f * hop;
-                for (int n = 0; n < nFft; n++)
+                if (!Unsafe.AreSame(
+                    ref MemoryMarshal.GetReference(input),
+                    ref MemoryMarshal.GetReference(output)))
                 {
-                    ola[dstOffset + n] += frames[srcOffset + n];
-                    env[dstOffset + n] += win2[n];
+                    input.CopyTo(output);
                 }
+                return;
             }
 
-            int done = _doneSamples;
-            if (_droppedRemaining >= done)
-            {
-                _droppedRemaining -= done;
-            }
-            else
-            {
-                int start = _droppedRemaining;
-                _droppedRemaining = 0;
+            input.CopyTo(_inBuf.AsSpan(_inLen, _doneSamples));
+            _inLen += _doneSamples;
 
-                if (start > 0)
+            bool emittedOutput = false;
+            while (_inLen >= _chunkInputSamples)
+            {
+                _inBuf.AsSpan(0, _chunkInputSamples).CopyTo(_wavBuffer);
+
+                int remainingIn = _inLen - _doneSamples;
+                if (remainingIn > 0)
                 {
-                    output.Slice(0, start).Clear();
+                    _inBuf.AsSpan(_doneSamples, remainingIn).CopyTo(_inBuf.AsSpan(0, remainingIn));
+                }
+                _inLen = remainingIn;
+
+                RunChunkInference();
+
+                // Overlap-add K frames of length nFft (512) at stride hopLength (128).
+                float[] frames = _framesBuffer;
+                float[] ola = _olaBuffer;
+                int nFft = _nFft;
+                int hop = _hopLength;
+                int hopsPerChunk = _hopsPerChunk;
+
+                for (int f = 0; f < hopsPerChunk; f++)
+                {
+                    WasapiPcmConverter.AddInPlace(
+                        frames.AsSpan(f * nFft, nFft),
+                        ola.AsSpan(f * hop, nFft));
                 }
 
-                float gain = _outputGain;
-                for (int i = start; i < done; i++)
-                {
-                    float denom = env[i];
-                    output[i] = (ola[i] / (denom > 1e-11f ? denom : 1f)) * gain;
-                }
-
+                int done = _doneSamples;
+                float scale = _outputGain / _olaSumNorm;
+                WasapiPcmConverter.MultiplyScalar(ola.AsSpan(0, done), scale, output);
                 emittedOutput = true;
+
+                int olaTail = ola.Length - done;
+                ola.AsSpan(done, olaTail).CopyTo(ola.AsSpan(0, olaTail));
+                ola.AsSpan(olaTail, done).Clear();
             }
 
-            int olaTail = ola.Length - done;
-            ola.AsSpan(done, olaTail).CopyTo(ola.AsSpan(0, olaTail));
-            ola.AsSpan(olaTail, done).Clear();
-
-            env.AsSpan(done, olaTail).CopyTo(env.AsSpan(0, olaTail));
-            env.AsSpan(olaTail, done).Clear();
-        }
-
-        if (!emittedOutput)
-        {
-            output.Clear();
+            if (!emittedOutput)
+            {
+                output.Clear();
+            }
         }
     }
 
     public void ResetState()
     {
-        if (!Volatile.Read(ref _isInitialized))
+        lock (_inferenceLock)
+        {
+            if (_disposed || !Volatile.Read(ref _isInitialized))
+            {
+                return;
+            }
+
+            Array.Clear(_inBuf);
+            Array.Clear(_olaBuffer);
+            Array.Clear(_wavBuffer);
+            Array.Clear(_framesBuffer);
+            Array.Clear(_hBufferA);
+            Array.Clear(_hBufferB);
+            Array.Clear(_cBufferA);
+            Array.Clear(_cBufferB);
+
+            // Pre-seed overlap tail (384 zeros) so the very first chunk has S = 384 + K*128 samples with zero cold stall.
+            _inLen = _overlapSamples;
+            _stateIsA = true;
+            _needsCudaStateInit = true;
+
+            if (_ortHA is not null && _ortHB is not null && _ortCA is not null && _ortCB is not null)
+            {
+                _inputValues[_hInputSlot] = _ortHA;
+                _inputValues[_cInputSlot] = _ortCA;
+                _outputValues[_hOutputSlot] = _ortHB;
+                _outputValues[_cOutputSlot] = _ortCB;
+            }
+        }
+    }
+
+    public void UpdateCpuAffinity(ulong coreMask, ushort processorGroup = 0)
+    {
+        if (coreMask == 0)
         {
             return;
         }
 
-        Array.Clear(_inBuf);
-        Array.Clear(_olaBuffer);
-        Array.Clear(_envBuffer);
-        Array.Clear(_wavBuffer);
-        Array.Clear(_framesBuffer);
-        Array.Clear(_hBufferA);
-        Array.Clear(_hBufferB);
-        Array.Clear(_cBufferA);
-        Array.Clear(_cBufferB);
-
-        _inLen = 0;
-        _didStartupPad = false;
-        _droppedRemaining = 0;
-        _stateIsA = true;
-
-        if (_ortHA is not null && _ortHB is not null && _ortCA is not null && _ortCB is not null)
+        lock (_lifecycleLock)
         {
-            _inputValues[_hInputSlot] = _ortHA;
-            _inputValues[_cInputSlot] = _ortCA;
-            _outputValues[_hOutputSlot] = _ortHB;
-            _outputValues[_cOutputSlot] = _ortCB;
+            if (_disposed ||
+                !Volatile.Read(ref _isInitialized) ||
+                _requestedBackend != ComputeBackend.Cpu ||
+                _ortWorkerThreadIds.Count == 0 ||
+                (_lastBoundCoreMask == coreMask && _lastBoundProcessorGroup == processorGroup))
+            {
+                return;
+            }
+
+            new CpuAffinityManager().BindSpecificThreads(_ortWorkerThreadIds, coreMask, processorGroup);
+            _lastBoundCoreMask = coreMask;
+            _lastBoundProcessorGroup = processorGroup;
         }
     }
 
@@ -438,17 +446,72 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
 
     private void WarmupCore()
     {
-        if (_chunkSessionResult is null || _runOptions is null)
+        lock (_inferenceLock)
         {
-            return;
+            if (_disposed || _chunkSessionResult is null || _runOptions is null)
+            {
+                return;
+            }
+
+            Array.Clear(_wavBuffer);
+            for (int i = 0; i < 2; i++)
+            {
+                RunChunkInference();
+            }
+            ResetState();
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void RunChunkInference()
+    {
+        if (_useCudaIoBinding && _runOptions is not null && _chunkSessionResult is not null)
+        {
+            OrtIoBinding? binding;
+            if (_needsCudaStateInit)
+            {
+                binding = _ioBindingReset;
+                _needsCudaStateInit = false;
+                _stateIsA = false;
+            }
+            else if (_stateIsA)
+            {
+                binding = _ioBindingA;
+                _stateIsA = false;
+            }
+            else
+            {
+                binding = _ioBindingB;
+                _stateIsA = true;
+            }
+
+            if (binding is not null)
+            {
+                // CPU-pinned _ortWav must be rebound before each run because ORT copies CPU->GPU at BindInput() time.
+                binding.BindInput(_wavInputName, _ortWav!);
+                _chunkSessionResult.Session.RunWithBinding(_runOptions, binding);
+                binding.SynchronizeBoundOutputs();
+                return;
+            }
         }
 
-        Array.Clear(_wavBuffer);
-        for (int i = 0; i < 2; i++)
+        _chunkSessionResult!.Session.Run(_runOptions!, _inputNames, _inputValues, _outputNames, _outputValues);
+
+        _stateIsA = !_stateIsA;
+        if (_stateIsA)
         {
-            _chunkSessionResult.Session.Run(_runOptions, _inputNames, _inputValues, _outputNames, _outputValues);
+            _inputValues[_hInputSlot] = _ortHA!;
+            _inputValues[_cInputSlot] = _ortCA!;
+            _outputValues[_hOutputSlot] = _ortHB!;
+            _outputValues[_cOutputSlot] = _ortCB!;
         }
-        ResetState();
+        else
+        {
+            _inputValues[_hInputSlot] = _ortHB!;
+            _inputValues[_cInputSlot] = _ortCB!;
+            _outputValues[_hOutputSlot] = _ortHA!;
+            _outputValues[_cOutputSlot] = _ortCA!;
+        }
     }
 
     private static int ResolveIntraOpThreads(AudioStageOptions options)
@@ -458,14 +521,20 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
             return Math.Clamp(options.OrtIntraOpThreads, 1, 8);
         }
 
-        if (options.Backend == ComputeBackend.Cpu && options.CpuAffinityMask != 0)
+        if (options.Backend == ComputeBackend.Cuda)
         {
-            // A 27.3M BSRNN at 40 ms chunk takes ~51 ms on 1 E-Core (RTF=1.28) vs ~16-21 ms on 2-3 E-Cores (RTF=0.41-0.53).
-            int coreCount = BitOperations.PopCount(options.CpuAffinityMask);
-            return Math.Clamp(coreCount, 1, 3);
+            return 4;
         }
 
-        return 1;
+        if (options.Backend == ComputeBackend.Cpu && options.CpuAffinityMask != 0)
+        {
+            // A 27.3M BSRNN at 32 ms chunk runs in ~20 ms on 3 E-Cores, whereas 16 ms low-latency mode benefits from up to 4 P-Core threads.
+            int coreCount = BitOperations.PopCount(options.CpuAffinityMask);
+            int maxThreads = options.VoxLockHopsPerChunk <= 2 ? 4 : 3;
+            return Math.Clamp(coreCount, 1, maxThreads);
+        }
+
+        return options.VoxLockHopsPerChunk <= 2 ? 4 : 3;
     }
 
     public void Dispose()
@@ -477,8 +546,11 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
                 return;
             }
 
-            _disposed = true;
-            ReleaseResources();
+            lock (_inferenceLock)
+            {
+                _disposed = true;
+                ReleaseResources();
+            }
         }
     }
 
@@ -529,7 +601,7 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
         string wavSha256 = VoiceprintStorage.ComputeFileSha256Hex(effectiveWavPath);
         float[] enrollWindow = SelectLoudestOrPadWindow(monoAtEnrollRate, minEnrollSamples, fbankHop, enrollSampleRate);
 
-        RunEnrollmentModel(manifest, enrollEntry, enrollWindow);
+        (float[] enrollNData, float[] kData, float[] vData) = RunEnrollmentModel(manifest, enrollEntry, enrollWindow);
 
         DateTimeOffset enrolledAtUtc = DateTimeOffset.UtcNow;
         string cachePath = VoiceprintStorage.GetCacheFilePath(_combinedModelSha256);
@@ -540,7 +612,10 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
             _combinedModelSha256,
             wavSha256,
             enrolledAtUtc,
-            sourceDurationSeconds);
+            sourceDurationSeconds,
+            enrollNData,
+            kData,
+            vData);
 
         var profile = new VoiceprintProfileInfo(
             SourceWavPath: effectiveWavPath,
@@ -550,12 +625,20 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
             SourceDurationSeconds: sourceDurationSeconds,
             LoadedFromCache: false);
 
-        Volatile.Write(ref _currentVoiceprint, profile);
-        Volatile.Write(ref _hasEnrolledVoiceprint, true);
+        lock (_inferenceLock)
+        {
+            enrollNData.AsSpan().CopyTo(_enrollNBuffer);
+            kData.AsSpan().CopyTo(_kBuffer);
+            vData.AsSpan().CopyTo(_vBuffer);
+            RefreshCudaIoBindings();
+            Volatile.Write(ref _currentVoiceprint, profile);
+            Volatile.Write(ref _hasEnrolledVoiceprint, true);
+        }
+
         return profile;
     }
 
-    private void RunEnrollmentModel(ModelManifest manifest, ModelEntry enrollEntry, float[] enrollWindow)
+    private (float[] EnrollN, float[] K, float[] V) RunEnrollmentModel(ModelManifest manifest, ModelEntry enrollEntry, float[] enrollWindow)
     {
         IReadOnlyList<TensorDescriptor> enrollInputs = enrollEntry.GetEffectiveInputs();
         IReadOnlyList<TensorDescriptor> enrollOutputs = enrollEntry.GetEffectiveOutputs();
@@ -577,11 +660,15 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
             _modelsRootDirectory,
             _requestedBackend);
 
+        float[] tempEnrollN = new float[_enrollNBuffer.Length];
+        float[] tempK = new float[_kBuffer.Length];
+        float[] tempV = new float[_vBuffer.Length];
+
         using var runOptions = new RunOptions();
         using OrtValue ovEnrollIn = OrtValue.CreateTensorValueFromMemory(enrollWindow, enrollInShape);
-        using OrtValue ovEnrollNOut = OrtValue.CreateTensorValueFromMemory(_enrollNBuffer, _enrollNShape);
-        using OrtValue ovKOut = OrtValue.CreateTensorValueFromMemory(_kBuffer, _kShape);
-        using OrtValue ovVOut = OrtValue.CreateTensorValueFromMemory(_vBuffer, _vShape);
+        using OrtValue ovEnrollNOut = OrtValue.CreateTensorValueFromMemory(tempEnrollN, _enrollNShape);
+        using OrtValue ovKOut = OrtValue.CreateTensorValueFromMemory(tempK, _kShape);
+        using OrtValue ovVOut = OrtValue.CreateTensorValueFromMemory(tempV, _vShape);
 
         enrollSession.Session.Run(
             runOptions,
@@ -589,6 +676,8 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
             [ovEnrollIn],
             [enrollNOutDesc.Name, kOutDesc.Name, vOutDesc.Name],
             [ovEnrollNOut, ovKOut, ovVOut]);
+
+        return (tempEnrollN, tempK, tempV);
     }
 
     private void AllocateChunkTensors(ModelEntry chunkEntry, ModelEntry enrollEntry)
@@ -643,10 +732,10 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
         {
             if (!string.IsNullOrEmpty(dim.SymbolicName))
             {
-                framesOverrides[dim.SymbolicName] = HopsPerChunk;
+                framesOverrides[dim.SymbolicName] = _hopsPerChunk;
             }
         }
-        long[] framesShape = OnnxSessionFactory.ResolveTensorShape(framesOutDesc, framesOverrides, HopsPerChunk);
+        long[] framesShape = OnnxSessionFactory.ResolveTensorShape(framesOutDesc, framesOverrides, _hopsPerChunk);
         _framesBuffer = GC.AllocateArray<float>(OnnxSessionFactory.ComputeElementCount(framesShape), pinned: true);
         _ortFrames = OrtValue.CreateTensorValueFromMemory(_framesBuffer, framesShape);
 
@@ -667,6 +756,8 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
 
         long[] hShape = OnnxSessionFactory.ResolveTensorShape(hInDesc);
         long[] cShape = OnnxSessionFactory.ResolveTensorShape(cInDesc);
+        _hShape = hShape;
+        _cShape = cShape;
         int hCount = OnnxSessionFactory.ComputeElementCount(hShape);
         int cCount = OnnxSessionFactory.ComputeElementCount(cShape);
 
@@ -684,14 +775,24 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
         TensorDescriptor chunkKDesc = FindDescriptorMatchingShape(inputs, _kShape);
         TensorDescriptor chunkVDesc = FindDescriptorMatchingShape(inputs, _vShape);
 
+        _wavInputName = wavInDesc.Name;
+        _enrollNInputName = chunkEnrollNDesc.Name;
+        _kInputName = chunkKDesc.Name;
+        _vInputName = chunkVDesc.Name;
+        _hInputName = hInDesc.Name;
+        _cInputName = cInDesc.Name;
+        _framesOutputName = framesOutDesc.Name;
+        _hOutputName = hOutDesc.Name;
+        _cOutputName = cOutDesc.Name;
+
         _inputNames =
         [
-            wavInDesc.Name,
-            chunkEnrollNDesc.Name,
-            chunkKDesc.Name,
-            chunkVDesc.Name,
-            hInDesc.Name,
-            cInDesc.Name
+            _wavInputName,
+            _enrollNInputName,
+            _kInputName,
+            _vInputName,
+            _hInputName,
+            _cInputName
         ];
 
         _inputValues =
@@ -707,7 +808,7 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
         _hInputSlot = 4;
         _cInputSlot = 5;
 
-        _outputNames = [framesOutDesc.Name, hOutDesc.Name, cOutDesc.Name];
+        _outputNames = [_framesOutputName, _hOutputName, _cOutputName];
         _outputValues = [_ortFrames, _ortHB, _ortCB];
         _hOutputSlot = 1;
         _cOutputSlot = 2;
@@ -728,6 +829,113 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
             double w = 0.5 - 0.5 * Math.Cos(twoPiOverN * n);
             _win2[n] = (float)(w * w);
         }
+
+        double overlapSum = 0.0;
+        for (int i = 0; i < nFft; i += _hopLength)
+        {
+            overlapSum += _win2[i];
+        }
+        _olaSumNorm = overlapSum > 1e-6 ? (float)overlapSum : 1.5f;
+    }
+
+    private bool TryInitializeCudaIoBindings()
+    {
+        if (_chunkSessionResult is null ||
+            _ortWav is null || _ortEnrollN is null || _ortK is null || _ortV is null ||
+            _ortHA is null || _ortCA is null || _ortFrames is null ||
+            _hShape.Length == 0 || _cShape.Length == 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            InferenceSession session = _chunkSessionResult.Session;
+            _cudaMemInfo = new OrtMemoryInfo("Cuda", OrtAllocatorType.DeviceAllocator, 0, OrtMemType.Default);
+            _cudaAllocator = new OrtAllocator(session, _cudaMemInfo);
+
+            _cudaHA = OrtValue.CreateAllocatedTensorValue(_cudaAllocator, TensorElementType.Float, _hShape);
+            _cudaHB = OrtValue.CreateAllocatedTensorValue(_cudaAllocator, TensorElementType.Float, _hShape);
+            _cudaCA = OrtValue.CreateAllocatedTensorValue(_cudaAllocator, TensorElementType.Float, _cShape);
+            _cudaCB = OrtValue.CreateAllocatedTensorValue(_cudaAllocator, TensorElementType.Float, _cShape);
+
+            _ioBindingReset = session.CreateIoBinding();
+            _ioBindingA = session.CreateIoBinding();
+            _ioBindingB = session.CreateIoBinding();
+
+            RefreshCudaIoBindings();
+            return true;
+        }
+        catch
+        {
+            DisposeCudaIoBindings();
+            return false;
+        }
+    }
+
+    private void RefreshCudaIoBindings()
+    {
+        if (_ioBindingReset is null || _ioBindingA is null || _ioBindingB is null ||
+            _cudaHA is null || _cudaHB is null || _cudaCA is null || _cudaCB is null ||
+            _ortWav is null || _ortEnrollN is null || _ortK is null || _ortV is null ||
+            _ortHA is null || _ortCA is null || _ortFrames is null)
+        {
+            return;
+        }
+
+        ConfigureSingleIoBinding(_ioBindingReset, _ortHA, _ortCA, _cudaHB, _cudaCB);
+        ConfigureSingleIoBinding(_ioBindingA, _cudaHA, _cudaCA, _cudaHB, _cudaCB);
+        ConfigureSingleIoBinding(_ioBindingB, _cudaHB, _cudaCB, _cudaHA, _cudaCA);
+    }
+
+    private void ConfigureSingleIoBinding(
+        OrtIoBinding binding,
+        OrtValue hIn,
+        OrtValue cIn,
+        OrtValue hOut,
+        OrtValue cOut)
+    {
+        binding.ClearBoundInputs();
+        binding.ClearBoundOutputs();
+
+        binding.BindInput(_wavInputName, _ortWav!);
+        binding.BindInput(_enrollNInputName, _ortEnrollN!);
+        binding.BindInput(_kInputName, _ortK!);
+        binding.BindInput(_vInputName, _ortV!);
+        binding.BindInput(_hInputName, hIn);
+        binding.BindInput(_cInputName, cIn);
+
+        binding.BindOutput(_framesOutputName, _ortFrames!);
+        binding.BindOutput(_hOutputName, hOut);
+        binding.BindOutput(_cOutputName, cOut);
+    }
+
+    private void DisposeCudaIoBindings()
+    {
+        _useCudaIoBinding = false;
+        _needsCudaStateInit = true;
+
+        _ioBindingReset?.Dispose();
+        _ioBindingA?.Dispose();
+        _ioBindingB?.Dispose();
+        _ioBindingReset = null;
+        _ioBindingA = null;
+        _ioBindingB = null;
+
+        _cudaHA?.Dispose();
+        _cudaHB?.Dispose();
+        _cudaCA?.Dispose();
+        _cudaCB?.Dispose();
+        _cudaHA = null;
+        _cudaHB = null;
+        _cudaCA = null;
+        _cudaCB = null;
+
+        _cudaAllocator?.Dispose();
+        _cudaAllocator = null;
+
+        _cudaMemInfo?.Dispose();
+        _cudaMemInfo = null;
     }
 
     private static (string ChunkFilename, string EnrollFilename) GetModelFilenamesForVariant(VoxLockModelVariant variant) =>
@@ -913,7 +1121,10 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
         string combinedModelSha256,
         string sourceWavSha256,
         DateTimeOffset enrolledAtUtc,
-        double sourceDurationSeconds)
+        double sourceDurationSeconds,
+        float[] enrollNData,
+        float[] kData,
+        float[] vData)
     {
         string? dir = Path.GetDirectoryName(cachePath);
         if (!string.IsNullOrEmpty(dir))
@@ -934,9 +1145,9 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
             writer.Write(enrolledAtUtc.UtcTicks);
             writer.Write(sourceDurationSeconds);
 
-            WriteTensorPayload(writer, _enrollNShape, _enrollNBuffer);
-            WriteTensorPayload(writer, _kShape, _kBuffer);
-            WriteTensorPayload(writer, _vShape, _vBuffer);
+            WriteTensorPayload(writer, _enrollNShape, enrollNData);
+            WriteTensorPayload(writer, _kShape, kData);
+            WriteTensorPayload(writer, _vShape, vData);
             writer.Flush();
         }
 
@@ -988,11 +1199,22 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
                 return false;
             }
 
-            if (!TryReadTensorPayload(reader, _enrollNShape, _enrollNBuffer) ||
-                !TryReadTensorPayload(reader, _kShape, _kBuffer) ||
-                !TryReadTensorPayload(reader, _vShape, _vBuffer))
+            float[] tempEnrollN = new float[_enrollNBuffer.Length];
+            float[] tempK = new float[_kBuffer.Length];
+            float[] tempV = new float[_vBuffer.Length];
+            if (!TryReadTensorPayload(reader, _enrollNShape, tempEnrollN) ||
+                !TryReadTensorPayload(reader, _kShape, tempK) ||
+                !TryReadTensorPayload(reader, _vShape, tempV))
             {
                 return false;
+            }
+
+            lock (_inferenceLock)
+            {
+                tempEnrollN.AsSpan().CopyTo(_enrollNBuffer);
+                tempK.AsSpan().CopyTo(_kBuffer);
+                tempV.AsSpan().CopyTo(_vBuffer);
+                RefreshCudaIoBindings();
             }
 
             profile = new VoiceprintProfileInfo(
@@ -1099,6 +1321,8 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
         Volatile.Write(ref _hasEnrolledVoiceprint, false);
         Volatile.Write(ref _currentVoiceprint, null);
 
+        DisposeCudaIoBindings();
+
         _ortWav?.Dispose();
         _ortEnrollN?.Dispose();
         _ortK?.Dispose();
@@ -1129,5 +1353,8 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
         _inputValues = [];
         _outputNames = [];
         _outputValues = [];
+        _ortWorkerThreadIds.Clear();
+        _lastBoundCoreMask = 0;
+        _lastBoundProcessorGroup = 0;
     }
 }

@@ -28,9 +28,7 @@
                     <TextBlock Text="{Binding Source={x:Static loc:AppStrings.Current}, Path=ThemeLabel}"
                                FontSize="13.5"
                                FontWeight="{Binding Source={x:Static loc:AppStrings.Current}, Path=StrongFontWeight}"
-                               VerticalAlignment="Center"
-                               Margin="0,0,6,0" />
-                    <controls:InfoHintBadge HintText="{Binding Source={x:Static loc:AppStrings.Current}, Path=ThemeHint}" />
+                               VerticalAlignment="Center" />
                 </StackPanel>
 
                 <Border Grid.Column="1"
@@ -75,9 +73,7 @@
                     <TextBlock Text="{Binding Source={x:Static loc:AppStrings.Current}, Path=LanguageLabel}"
                                FontSize="13.5"
                                FontWeight="{Binding Source={x:Static loc:AppStrings.Current}, Path=StrongFontWeight}"
-                               VerticalAlignment="Center"
-                               Margin="0,0,6,0" />
-                    <controls:InfoHintBadge HintText="{Binding Source={x:Static loc:AppStrings.Current}, Path=LanguageHint}" />
+                               VerticalAlignment="Center" />
                 </StackPanel>
 
                 <Border Grid.Column="1"

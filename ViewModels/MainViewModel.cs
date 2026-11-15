@@ -108,6 +108,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private TelemetrySnapshot? _latestSnapshot;
     private string? _latestActiveCoreRawDescription;
+    private volatile bool _isWindowActiveForTelemetry = true;
+    private long _lastUiTelemetryTick;
+    private int _cachedLatencyMs = int.MinValue;
+    private int _cachedInfTenths = int.MinValue;
+    private string? _cachedCoreRaw;
+    private AppLanguage _cachedCoreLang = (AppLanguage)(-1);
+    private int _cachedVadProbHundredths = int.MinValue;
+    private bool _cachedVadSpeechActive;
+    private bool _cachedVadEnabled;
+    private AppLanguage _cachedVadLang = (AppLanguage)(-1);
     private string? _lastStatusError;
     private RecordingMessageKind _recordingMessageKind = RecordingMessageKind.Idle;
     private double _lastCompletedDurationSeconds;
@@ -224,6 +234,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private VoxLockModelVariant _selectedVoxLockVariant = VoxLockModelVariant.Int8;
+
+    [ObservableProperty]
+    private bool _voxLockLowLatencyMode;
 
     // Compute & Core Affinity
     [ObservableProperty]
@@ -465,6 +478,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         _ = SwitchComputeOrVariantAsync(SelectedComputeBackend, value);
+    }
+
+    partial void OnVoxLockLowLatencyModeChanged(bool value)
+    {
+        if (_isHydrating)
+        {
+            return;
+        }
+
+        _ = SwitchComputeOrVariantAsync(null, null, value);
     }
 
     partial void OnIsCpuBackendSelectedChanged(bool value)
@@ -985,12 +1008,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    private async Task SwitchComputeOrVariantAsync(ComputeBackend backend, VoxLockModelVariant variant)
+    private async Task SwitchComputeOrVariantAsync(
+        ComputeBackend? backend = null,
+        VoxLockModelVariant? variant = null,
+        bool? lowLatencyMode = null)
     {
         IsBusy = true;
         try
         {
-            await _controller.SwitchComputeOrVariantAsync(backend, variant);
+            await _controller.SwitchComputeOrVariantAsync(backend, variant, lowLatencyMode);
             RefreshBackendBanner();
             RefreshVoiceprintStatus();
         }
@@ -1028,6 +1054,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             GtcrnEnabled = settings.GtcrnEnabled;
             VoxLockEnabled = settings.VoxLockEnabled;
             SelectedVoxLockVariant = settings.VoxLockVariant;
+            VoxLockLowLatencyMode = settings.VoxLockLowLatencyMode;
 
             SelectedComputeBackend = settings.ComputeBackend;
             IsCpuBackendSelected = settings.ComputeBackend == ComputeBackend.Cpu;
@@ -1257,6 +1284,28 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    public void SetWindowActiveForTelemetry(bool isActive)
+    {
+        bool wasActive = _isWindowActiveForTelemetry;
+        _isWindowActiveForTelemetry = isActive;
+
+        if (isActive && !wasActive)
+        {
+            TelemetrySnapshot? snapshot = Volatile.Read(ref _latestSnapshot);
+            if (snapshot is not null)
+            {
+                Interlocked.Exchange(ref _lastUiTelemetryTick, Stopwatch.GetTimestamp());
+                BeginInvokeOnUi(() =>
+                {
+                    if (!_disposed)
+                    {
+                        ApplyTelemetrySnapshot(snapshot);
+                    }
+                });
+            }
+        }
+    }
+
     private void ApplyTelemetrySnapshot(TelemetrySnapshot snapshot)
     {
         switch (snapshot.State)
@@ -1266,26 +1315,64 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 if (VadEnabled && !snapshot.VadSpeechActive)
                 {
                     StatusKind = PipelineStatusKind.Sleeping;
-                    StatusBadgeText = AppStrings.Current.StatusSleeping;
+                    if (!string.Equals(StatusBadgeText, AppStrings.Current.StatusSleeping, StringComparison.Ordinal))
+                    {
+                        StatusBadgeText = AppStrings.Current.StatusSleeping;
+                    }
                 }
                 else
                 {
                     StatusKind = PipelineStatusKind.Running;
-                    StatusBadgeText = AppStrings.Current.StatusRunning;
+                    if (!string.Equals(StatusBadgeText, AppStrings.Current.StatusRunning, StringComparison.Ordinal))
+                    {
+                        StatusBadgeText = AppStrings.Current.StatusRunning;
+                    }
                 }
 
-                TelemetryLatencyText = $"~{Math.Round(snapshot.LatencyMs):0} ms";
-                TelemetryInferenceText = $"{snapshot.FrameInferenceMs:0.0} ms";
+                int roundedLatencyMs = (int)Math.Round(snapshot.LatencyMs);
+                if (_cachedLatencyMs != roundedLatencyMs)
+                {
+                    _cachedLatencyMs = roundedLatencyMs;
+                    TelemetryLatencyText = $"~{roundedLatencyMs:0} ms";
+                }
+
+                int infTenths = (int)Math.Round(snapshot.FrameInferenceMs * 10.0);
+                if (_cachedInfTenths != infTenths)
+                {
+                    _cachedInfTenths = infTenths;
+                    TelemetryInferenceText = $"{snapshot.FrameInferenceMs:0.0} ms";
+                }
+
                 _latestActiveCoreRawDescription = snapshot.ActiveCoreDescription;
-                TelemetryCoreText = AppStrings.Current.FormatShortCoreDescription(
-                    snapshot.ActiveCoreDescription,
-                    _controller.CpuTopology);
+                AppLanguage currentLang = AppStrings.Current.Language;
+                if (!string.Equals(_cachedCoreRaw, snapshot.ActiveCoreDescription, StringComparison.Ordinal) ||
+                    _cachedCoreLang != currentLang)
+                {
+                    _cachedCoreRaw = snapshot.ActiveCoreDescription;
+                    _cachedCoreLang = currentLang;
+                    TelemetryCoreText = AppStrings.Current.FormatShortCoreDescription(
+                        snapshot.ActiveCoreDescription,
+                        _controller.CpuTopology);
+                }
+
                 InputLevelPercent = RmsToMeterPercent(snapshot.InputRms);
                 OutputLevelPercent = RmsToMeterPercent(snapshot.OutputRms);
-                VadLiveProbText = AppStrings.Current.FormatVadLiveProb(
-                    snapshot.VadProbability,
-                    snapshot.VadSpeechActive,
-                    VadEnabled);
+
+                int vadHundredths = (int)Math.Round(snapshot.VadProbability * 100.0);
+                if (_cachedVadProbHundredths != vadHundredths ||
+                    _cachedVadSpeechActive != snapshot.VadSpeechActive ||
+                    _cachedVadEnabled != VadEnabled ||
+                    _cachedVadLang != currentLang)
+                {
+                    _cachedVadProbHundredths = vadHundredths;
+                    _cachedVadSpeechActive = snapshot.VadSpeechActive;
+                    _cachedVadEnabled = VadEnabled;
+                    _cachedVadLang = currentLang;
+                    VadLiveProbText = AppStrings.Current.FormatVadLiveProb(
+                        snapshot.VadProbability,
+                        snapshot.VadSpeechActive,
+                        VadEnabled);
+                }
                 break;
 
             case PipelineRunState.Starting:
@@ -1303,6 +1390,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 InputLevelPercent = 0;
                 OutputLevelPercent = 0;
                 VadLiveProbText = "--";
+                _cachedLatencyMs = int.MinValue;
+                _cachedInfTenths = int.MinValue;
+                _cachedVadProbHundredths = int.MinValue;
                 break;
 
             default:
@@ -1314,6 +1404,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 InputLevelPercent = 0;
                 OutputLevelPercent = 0;
                 VadLiveProbText = "--";
+                _cachedLatencyMs = int.MinValue;
+                _cachedInfTenths = int.MinValue;
+                _cachedVadProbHundredths = int.MinValue;
                 break;
         }
     }
@@ -1374,6 +1467,32 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private void OnControllerTelemetryUpdated(object? sender, TelemetrySnapshot snapshot)
     {
+        Volatile.Write(ref _latestSnapshot, snapshot);
+
+        if (snapshot.State == PipelineRunState.Running)
+        {
+            double minIntervalMs = !_isWindowActiveForTelemetry
+                ? 1000.0
+                : (ActiveTab != NavigationTab.Pipeline ? 250.0 : 0.0);
+
+            if (minIntervalMs > 0.0)
+            {
+                long nowTick = Stopwatch.GetTimestamp();
+                long prevTick = Interlocked.Read(ref _lastUiTelemetryTick);
+                double elapsedMs = (nowTick - prevTick) * 1000.0 / Stopwatch.Frequency;
+                if (elapsedMs < minIntervalMs)
+                {
+                    return;
+                }
+
+                Interlocked.Exchange(ref _lastUiTelemetryTick, nowTick);
+            }
+            else
+            {
+                Interlocked.Exchange(ref _lastUiTelemetryTick, Stopwatch.GetTimestamp());
+            }
+        }
+
         BeginInvokeOnUi(() =>
         {
             if (_disposed)
@@ -1381,8 +1500,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            _latestSnapshot = snapshot;
-            ApplyTelemetrySnapshot(snapshot);
+            TelemetrySnapshot current = Volatile.Read(ref _latestSnapshot) ?? snapshot;
+            ApplyTelemetrySnapshot(current);
         });
     }
 

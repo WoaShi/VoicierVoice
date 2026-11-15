@@ -16,7 +16,8 @@ public sealed record AudioStageOptions(
     int OrtIntraOpThreads = 1,
     int OrtInterOpThreads = 1,
     ulong CpuAffinityMask = 0,
-    ushort ProcessorGroup = 0)
+    ushort ProcessorGroup = 0,
+    int VoxLockHopsPerChunk = 4)
 {
     public static AudioStageOptions CreateDefault(string? baseDirectory = null)
     {
@@ -56,6 +57,11 @@ public interface IAudioFilterStage : IDisposable
     /// before live microphone capture begins, eliminating cold-start latency spikes.
     /// </summary>
     void Warmup() { }
+
+    /// <summary>
+    /// Updates CPU affinity for internal stage worker threads (e.g. ONNX intra-op pool threads) at runtime.
+    /// </summary>
+    void UpdateCpuAffinity(ulong coreMask, ushort processorGroup = 0) { }
 }
 
 /// <summary>

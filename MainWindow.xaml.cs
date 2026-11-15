@@ -19,6 +19,7 @@ public partial class MainWindow : Window
         DataContextChanged += OnMainWindowDataContextChanged;
         ContentRendered += OnMainWindowContentRendered;
         StateChanged += OnWindowStateChanged;
+        IsVisibleChanged += OnWindowIsVisibleChanged;
         Closed += OnMainWindowClosed;
     }
 
@@ -159,6 +160,7 @@ public partial class MainWindow : Window
         {
             _subscribedViewModel = vm;
             _subscribedViewModel.GuidanceRequested += OnGuidanceRequested;
+            UpdateTelemetryWindowActivity();
         }
     }
 
@@ -187,6 +189,18 @@ public partial class MainWindow : Window
     private void OnWindowStateChanged(object? sender, EventArgs e)
     {
         UpdateMaximizedLayoutState();
+        UpdateTelemetryWindowActivity();
+    }
+
+    private void OnWindowIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        UpdateTelemetryWindowActivity();
+    }
+
+    private void UpdateTelemetryWindowActivity()
+    {
+        bool active = IsVisible && WindowState != WindowState.Minimized;
+        _subscribedViewModel?.SetWindowActiveForTelemetry(active);
     }
 
     private void UpdateMaximizedLayoutState()

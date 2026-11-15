@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "1.0.1",
+    [string]$Version = "1.0.2",
     [string]$Configuration = "Release",
     [string[]]$Rids = @("win-x64", "win-arm64"),
     [switch]$SkipSelfTest

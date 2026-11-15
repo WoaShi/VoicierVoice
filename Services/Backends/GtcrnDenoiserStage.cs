@@ -29,11 +29,15 @@ public sealed class GtcrnDenoiserStage : IAudioFilterStage
     private float[] _analysisBuffer = [];
     private float[] _synthesisOla = [];
 
+    private int _fftHalf;
     private int[] _bitRev = [];
     private float[] _twiddleCos = [];
     private float[] _twiddleSin = [];
+    private float[] _realTwiddleCos = [];
+    private float[] _realTwiddleSin = [];
     private float[] _fftReal = [];
     private float[] _fftImag = [];
+    private float[] _windowedScratch = [];
 
     private float[] _mixBuffer = [];
     private float[] _enhBuffer = [];
@@ -113,13 +117,15 @@ public sealed class GtcrnDenoiserStage : IAudioFilterStage
                 options.ModelsRootDirectory,
                 options.Backend);
 
+            _fftHalf = _nFft >> 1;
             BuildFftTables(_nFft);
             BuildHannSqrtWindow(_nFft, audio.WindowType);
 
             _analysisBuffer = GC.AllocateArray<float>(_nFft, pinned: false);
             _synthesisOla = GC.AllocateArray<float>(_nFft, pinned: false);
-            _fftReal = GC.AllocateArray<float>(_nFft, pinned: false);
-            _fftImag = GC.AllocateArray<float>(_nFft, pinned: false);
+            _fftReal = GC.AllocateArray<float>(_fftHalf, pinned: false);
+            _fftImag = GC.AllocateArray<float>(_fftHalf, pinned: false);
+            _windowedScratch = GC.AllocateArray<float>(_nFft, pinned: false);
 
             // Identify spectrum tensor ("mix" / "enh": rank 4 with freqBins & 2) vs state cache tensors.
             int mixInIdx = FindSpectrumTensorIndex(inputs, _freqBins);
@@ -223,29 +229,67 @@ public sealed class GtcrnDenoiserStage : IAudioFilterStage
         _analysisBuffer.AsSpan(hop, nFft - hop).CopyTo(_analysisBuffer.AsSpan(0, nFft - hop));
         input.CopyTo(_analysisBuffer.AsSpan(nFft - hop, hop));
 
-        // 2. Apply periodic hann_sqrt analysis window and prepare complex buffer for FFT.
+        // 2. Apply periodic hann_sqrt analysis window and pack even/odd samples into N/2 complex bins.
         float[] win = _window;
         float[] analysis = _analysisBuffer;
+        float[] windowed = _windowedScratch;
+        WasapiPcmConverter.Multiply(analysis, win, windowed);
+
         float[] fftReal = _fftReal;
         float[] fftImag = _fftImag;
-
-        for (int i = 0; i < nFft; i++)
+        int halfFft = _fftHalf;
+        for (int i = 0; i < halfFft; i++)
         {
-            fftReal[i] = analysis[i] * win[i];
-            fftImag[i] = 0f;
+            int evenIdx = i << 1;
+            fftReal[i] = windowed[evenIdx];
+            fftImag[i] = windowed[evenIdx + 1];
         }
 
-        // 3. Unscaled 512-pt real->complex FFT, populate mix: [1, 257, 1, 2].
-        TransformInPlace(fftReal, fftImag, inverse: false);
+        // 3. Unscaled 256-pt complex FFT + real-to-Hermitian unpack into mix: [1, 257, 1, 2].
+        TransformComplexInPlace(fftReal, fftImag, inverse: false);
 
         float[] mix = _mixBuffer;
-        int bins = _freqBins;
-        for (int k = 0; k < bins; k++)
+        float dcSumRe = fftReal[0];
+        float dcSumIm = fftImag[0];
+        mix[0] = dcSumRe + dcSumIm;
+        mix[1] = 0f;
+        mix[halfFft << 1] = dcSumRe - dcSumIm;
+        mix[(halfFft << 1) + 1] = 0f;
+
+        int quarter = halfFft >> 1;
+        float[] realCos = _realTwiddleCos;
+        float[] realSin = _realTwiddleSin;
+
+        for (int k = 1; k < quarter; k++)
         {
-            int idx = k << 1;
-            mix[idx] = fftReal[k];
-            mix[idx + 1] = fftImag[k];
+            int mk = halfFft - k;
+            float ar = fftReal[k];
+            float ai = fftImag[k];
+            float br = fftReal[mk];
+            float bi = fftImag[mk];
+
+            float er = 0.5f * (ar + br);
+            float ei = 0.5f * (ai - bi);
+            float or_ = 0.5f * (ai + bi);
+            float oi = 0.5f * (br - ar);
+
+            float c = realCos[k];
+            float s = realSin[k];
+            float tr = or_ * c + oi * s;
+            float ti = oi * c - or_ * s;
+
+            int kIdx = k << 1;
+            mix[kIdx] = er + tr;
+            mix[kIdx + 1] = ei + ti;
+
+            int mkIdx = mk << 1;
+            mix[mkIdx] = er - tr;
+            mix[mkIdx + 1] = ti - ei;
         }
+
+        int qIdx = quarter << 1;
+        mix[qIdx] = fftReal[quarter];
+        mix[qIdx + 1] = -fftImag[quarter];
 
         // 4. Run GTCRN inference and ping-pong caches with zero heap allocations.
         _sessionResult.Session.Run(_runOptions, _inputNames, _inputValues, _outputNames, _outputValues);
@@ -268,34 +312,53 @@ public sealed class GtcrnDenoiserStage : IAudioFilterStage
             }
         }
 
-        // 5. Reconstruct Hermitian spectrum from enh: [1, 257, 1, 2] and run 1/512-scaled IFFT.
+        // 5. Pack Hermitian spectrum enh: [1, 257, 1, 2] into N/2 complex bins and run 1/(N/2)-scaled IFFT.
         float[] enh = _enhBuffer;
-        fftReal[0] = enh[0];
-        fftImag[0] = 0f;
+        fftReal[0] = 0.5f * (enh[0] + enh[halfFft << 1]);
+        fftImag[0] = 0.5f * (enh[0] - enh[halfFft << 1]);
 
-        int half = nFft >> 1;
-        for (int k = 1; k < half; k++)
+        for (int k = 1; k < quarter; k++)
         {
-            int idx = k << 1;
-            float re = enh[idx];
-            float im = enh[idx + 1];
-            fftReal[k] = re;
-            fftImag[k] = im;
-            fftReal[nFft - k] = re;
-            fftImag[nFft - k] = -im;
+            int mk = halfFft - k;
+            int kIdx = k << 1;
+            int mkIdx = mk << 1;
+
+            float ar = enh[kIdx];
+            float ai = enh[kIdx + 1];
+            float br = enh[mkIdx];
+            float bi = enh[mkIdx + 1];
+
+            float pr = ar + br;
+            float pi = ai - bi;
+            float dr = ar - br;
+            float di = ai + bi;
+
+            float c = realCos[k];
+            float s = realSin[k];
+            float qr = dr * c - di * s;
+            float qi = dr * s + di * c;
+
+            fftReal[k] = 0.5f * (pr - qi);
+            fftImag[k] = 0.5f * (pi + qr);
+            fftReal[mk] = 0.5f * (pr + qi);
+            fftImag[mk] = 0.5f * (qr - pi);
         }
 
-        fftReal[half] = enh[half << 1];
-        fftImag[half] = 0f;
+        fftReal[quarter] = enh[qIdx];
+        fftImag[quarter] = -enh[qIdx + 1];
 
-        TransformInPlace(fftReal, fftImag, inverse: true);
+        TransformComplexInPlace(fftReal, fftImag, inverse: true);
 
-        // 6. Apply synthesis hann_sqrt window and overlap-add (w[n]^2 + w[n+256]^2 == 1.0 -> 0 dB unity).
+        // 6. Unpack real time-domain frame, apply synthesis hann_sqrt window, and overlap-add.
+        for (int i = 0; i < halfFft; i++)
+        {
+            int evenIdx = i << 1;
+            windowed[evenIdx] = fftReal[i];
+            windowed[evenIdx + 1] = fftImag[i];
+        }
+
         float[] ola = _synthesisOla;
-        for (int i = 0; i < nFft; i++)
-        {
-            ola[i] += fftReal[i] * win[i];
-        }
+        WasapiPcmConverter.MultiplyAddInPlace(windowed, win, ola);
 
         ola.AsSpan(0, hop).CopyTo(output);
         ola.AsSpan(hop, nFft - hop).CopyTo(ola.AsSpan(0, nFft - hop));
@@ -373,14 +436,15 @@ public sealed class GtcrnDenoiserStage : IAudioFilterStage
 
     private void BuildFftTables(int nFft)
     {
+        int m = nFft >> 1;
         int bits = 0;
-        for (int v = nFft; v > 1; v >>= 1)
+        for (int v = m; v > 1; v >>= 1)
         {
             bits++;
         }
 
-        _bitRev = new int[nFft];
-        for (int i = 0; i < nFft; i++)
+        _bitRev = new int[m];
+        for (int i = 0; i < m; i++)
         {
             int rev = 0;
             int x = i;
@@ -393,22 +457,32 @@ public sealed class GtcrnDenoiserStage : IAudioFilterStage
             _bitRev[i] = rev;
         }
 
-        int half = nFft >> 1;
-        _twiddleCos = new float[half];
-        _twiddleSin = new float[half];
-        double twoPiOverN = 2.0 * Math.PI / nFft;
-        for (int k = 0; k < half; k++)
+        int halfM = m >> 1;
+        _twiddleCos = new float[halfM];
+        _twiddleSin = new float[halfM];
+        double twoPiOverM = 2.0 * Math.PI / m;
+        for (int k = 0; k < halfM; k++)
         {
-            double angle = twoPiOverN * k;
+            double angle = twoPiOverM * k;
             _twiddleCos[k] = (float)Math.Cos(angle);
             _twiddleSin[k] = (float)Math.Sin(angle);
+        }
+
+        _realTwiddleCos = new float[halfM];
+        _realTwiddleSin = new float[halfM];
+        double twoPiOverN = 2.0 * Math.PI / nFft;
+        for (int k = 0; k < halfM; k++)
+        {
+            double angle = twoPiOverN * k;
+            _realTwiddleCos[k] = (float)Math.Cos(angle);
+            _realTwiddleSin[k] = (float)Math.Sin(angle);
         }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    private void TransformInPlace(float[] real, float[] imag, bool inverse)
+    private void TransformComplexInPlace(float[] real, float[] imag, bool inverse)
     {
-        int n = _nFft;
+        int n = _fftHalf;
         int[] bitRev = _bitRev;
 
         for (int i = 0; i < n; i++)
@@ -458,12 +532,9 @@ public sealed class GtcrnDenoiserStage : IAudioFilterStage
 
         if (inverse)
         {
-            float invN = 1f / n;
-            for (int i = 0; i < n; i++)
-            {
-                real[i] *= invN;
-                imag[i] *= invN;
-            }
+            float invM = 1f / n;
+            WasapiPcmConverter.MultiplyScalar(real.AsSpan(0, n), invM, real.AsSpan(0, n));
+            WasapiPcmConverter.MultiplyScalar(imag.AsSpan(0, n), invM, imag.AsSpan(0, n));
         }
     }
 

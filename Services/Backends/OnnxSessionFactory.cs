@@ -125,8 +125,15 @@ public static class OnnxSessionFactory
             try
             {
                 EnsureCudaDllSearchPath();
-                using SessionOptions cudaOptions = CreateBaseSessionOptions(1);
-                cudaOptions.AppendExecutionProvider_CUDA(0);
+                using SessionOptions cudaOptions = CreateBaseSessionOptions(safeThreads);
+                using var cudaProviderOptions = new OrtCUDAProviderOptions();
+                cudaProviderOptions.UpdateOptions(new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["device_id"] = "0",
+                    ["cudnn_conv_algo_search"] = "HEURISTIC",
+                    ["do_copy_in_default_stream"] = "1"
+                });
+                cudaOptions.AppendExecutionProvider_CUDA(cudaProviderOptions);
 
                 var cudaSession = new InferenceSession(fullPath, cudaOptions);
                 return new OnnxSessionResult(
@@ -231,10 +238,17 @@ public static class OnnxSessionFactory
         {
             IntraOpNumThreads = intraOpNumThreads,
             InterOpNumThreads = 1,
+            ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
+            EnableCpuMemArena = true,
+            EnableMemoryPattern = true,
             GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
             LogSeverityLevel = OrtLoggingLevel.ORT_LOGGING_LEVEL_ERROR
         };
         opts.AddSessionConfigEntry("session.set_denormal_as_zero", "1");
+        if (intraOpNumThreads <= 1)
+        {
+            opts.AddSessionConfigEntry("session.intra_op.allow_spinning", "0");
+        }
         return opts;
     }
 

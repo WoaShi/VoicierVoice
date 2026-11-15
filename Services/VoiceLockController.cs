@@ -98,7 +98,7 @@ public sealed class VoiceLockController : IDisposable
                 _manifest ??= ModelManifest.LoadDefault(_modelsRootDirectory);
                 InitializeStagesLocked();
                 _pipelineEngine.ApplySettings(_settings);
-                _pipelineEngine.SetActiveBackendDescription(ActiveProviderSummary);
+                _pipelineEngine.SetActiveBackend(ResolveActiveComputeBackend(), ActiveProviderSummary);
                 _isInitialized = true;
             }, cancellationToken).ConfigureAwait(false);
 
@@ -137,8 +137,8 @@ public sealed class VoiceLockController : IDisposable
 
             await Task.Run(() =>
             {
+                _pipelineEngine.SetActiveBackend(ResolveActiveComputeBackend(), ActiveProviderSummary);
                 _pipelineEngine.Start(_settings);
-                _pipelineEngine.SetActiveBackendDescription(ActiveProviderSummary);
             }, cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -204,8 +204,8 @@ public sealed class VoiceLockController : IDisposable
                 await Task.Run(() =>
                 {
                     _pipelineEngine.Stop();
+                    _pipelineEngine.SetActiveBackend(ResolveActiveComputeBackend(), ActiveProviderSummary);
                     _pipelineEngine.Start(_settings);
-                    _pipelineEngine.SetActiveBackendDescription(ActiveProviderSummary);
                 }, cancellationToken).ConfigureAwait(false);
             }
         }
@@ -231,7 +231,7 @@ public sealed class VoiceLockController : IDisposable
         _settings.Save();
 
         _pipelineEngine.ApplySettings(_settings);
-        _pipelineEngine.SetActiveBackendDescription(ActiveProviderSummary);
+        _pipelineEngine.SetActiveBackend(ResolveActiveComputeBackend(), ActiveProviderSummary);
     }
 
     public void UpdateCpuAffinity(bool autoAffinityEnabled, ulong selectedCoreMask, ushort processorGroup = 0)
@@ -265,8 +265,9 @@ public sealed class VoiceLockController : IDisposable
     /// cleanly pausing and resuming the audio pipeline if active and auto-migrating the voiceprint cache.
     /// </summary>
     public async Task SwitchComputeOrVariantAsync(
-        ComputeBackend backend,
-        VoxLockModelVariant variant,
+        ComputeBackend? backend = null,
+        VoxLockModelVariant? variant = null,
+        bool? lowLatencyMode = null,
         CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -274,15 +275,21 @@ public sealed class VoiceLockController : IDisposable
         await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            ComputeBackend targetBackend = backend ?? _settings.ComputeBackend;
+            VoxLockModelVariant targetVariant = variant ?? _settings.VoxLockVariant;
+            bool targetLowLatency = lowLatencyMode ?? _settings.VoxLockLowLatencyMode;
+
             if (_isInitialized &&
-                _settings.ComputeBackend == backend &&
-                _settings.VoxLockVariant == variant)
+                _settings.ComputeBackend == targetBackend &&
+                _settings.VoxLockVariant == targetVariant &&
+                _settings.VoxLockLowLatencyMode == targetLowLatency)
             {
                 return;
             }
 
-            _settings.ComputeBackend = backend;
-            _settings.VoxLockVariant = variant;
+            _settings.ComputeBackend = targetBackend;
+            _settings.VoxLockVariant = targetVariant;
+            _settings.VoxLockLowLatencyMode = targetLowLatency;
             _settings.Save();
 
             bool wasRunning = _pipelineEngine.IsRunning;
@@ -298,7 +305,7 @@ public sealed class VoiceLockController : IDisposable
                 InitializeStagesLocked();
                 _pipelineEngine.SetStages(_vadStage, _gtcrnStage, _voxLockBackend);
                 _pipelineEngine.ApplySettings(_settings);
-                _pipelineEngine.SetActiveBackendDescription(ActiveProviderSummary);
+                _pipelineEngine.SetActiveBackend(ResolveActiveComputeBackend(), ActiveProviderSummary);
                 _isInitialized = true;
             }, cancellationToken).ConfigureAwait(false);
 
@@ -309,8 +316,8 @@ public sealed class VoiceLockController : IDisposable
             {
                 await Task.Run(() =>
                 {
+                    _pipelineEngine.SetActiveBackend(ResolveActiveComputeBackend(), ActiveProviderSummary);
                     _pipelineEngine.Start(_settings);
-                    _pipelineEngine.SetActiveBackendDescription(ActiveProviderSummary);
                 }, cancellationToken).ConfigureAwait(false);
             }
 
@@ -422,7 +429,8 @@ public sealed class VoiceLockController : IDisposable
         ushort affinityGroup;
         if (_settings.AutoAffinityEnabled || _settings.SelectedCoreMask == 0)
         {
-            affinityMask = _affinityManager.GetRecommendedAudioWorkerMask(out affinityGroup, out _);
+            bool preferPCores = _settings.ComputeBackend == ComputeBackend.Cpu && _settings.VoxLockLowLatencyMode;
+            affinityMask = _affinityManager.GetRecommendedAudioWorkerMask(out affinityGroup, out _, preferPCores);
         }
         else
         {
@@ -452,6 +460,10 @@ public sealed class VoiceLockController : IDisposable
             _gtcrnStage.Initialize(vadGtcrnOptions);
         }
 
+        int effectiveHopsPerChunk = _settings.ComputeBackend == ComputeBackend.Cpu && _settings.VoxLockLowLatencyMode
+            ? 2
+            : 4;
+
         var voxLockOptions = new AudioStageOptions(
             ModelsRootDirectory: _modelsRootDirectory,
             Manifest: manifest,
@@ -459,11 +471,19 @@ public sealed class VoiceLockController : IDisposable
             VoxLockVariant: _settings.VoxLockVariant,
             VadThreshold: _settings.VadThreshold,
             CpuAffinityMask: affinityMask,
-            ProcessorGroup: affinityGroup);
+            ProcessorGroup: affinityGroup,
+            VoxLockHopsPerChunk: effectiveHopsPerChunk);
 
         _voxLockBackend.Initialize(voxLockOptions);
 
         UpdateActiveProviderSummary();
+    }
+
+    private ComputeBackend ResolveActiveComputeBackend()
+    {
+        return string.Equals(_voxLockBackend.ActiveProviderName, "CUDAExecutionProvider", StringComparison.OrdinalIgnoreCase)
+            ? ComputeBackend.Cuda
+            : ComputeBackend.Cpu;
     }
 
     private void UpdateActiveProviderSummary()

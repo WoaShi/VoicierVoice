@@ -149,12 +149,94 @@ public static class SelfTestRunner
                     }
                 }
 
-                // 5. E-Core-pinned & CUDA 50-hop Cascade Inference (plus Drop-Oldest RingBuffer check)
-                RunCascadeBenchmark("CPU E-Core Locked (VAD+GTCRN+VoxLock 40ms INT8)", vadCpu, gtcrnCpu, voxCpu, affinity, topology.RecommendedCoreMask, topology.RecommendedProcessorGroup, Log);
+                // 5. E-Core-pinned & CUDA 60-hop Cascade Inference (plus 16ms K=2 low-latency mode & Drop-Oldest RingBuffer check)
+                RunCascadeBenchmark("CPU E-Core Locked (VAD+GTCRN+VoxLock 32ms INT8 K=4)", vadCpu, gtcrnCpu, voxCpu, affinity, topology.RecommendedCoreMask, topology.RecommendedProcessorGroup, Log);
 
                 if (cudaAvailable)
                 {
-                    RunCascadeBenchmark("Hybrid CUDA (CPU VAD+GTCRN + CUDA VoxLock 40ms INT8)", vadCpu, gtcrnCpu, voxCuda, null, 0, 0, Log);
+                    RunCascadeBenchmark("Hybrid CUDA (CPU VAD+GTCRN + CUDA VoxLock 32ms INT8 K=4)", vadCpu, gtcrnCpu, voxCuda, null, 0, 0, Log);
+                }
+
+                using (var voxCpuLowLat = new VoxLockOnnxBackend())
+                {
+                    ulong pCoreMask = affinity.GetRecommendedAudioWorkerMask(
+                        out ushort pCoreGroup,
+                        out _,
+                        preferPerformanceCores: true);
+                    var cpuLowLatOptions = new AudioStageOptions(
+                        AppContext.BaseDirectory,
+                        manifest,
+                        ComputeBackend.Cpu,
+                        VoxLockModelVariant.Int8,
+                        0.5f,
+                        CpuAffinityMask: pCoreMask,
+                        ProcessorGroup: pCoreGroup,
+                        VoxLockHopsPerChunk: 2);
+                    voxCpuLowLat.Initialize(cpuLowLatOptions);
+                    if (voxCpuLowLat.FrameSizeSamples != 256)
+                    {
+                        throw new InvalidOperationException($"Expected K=2 FrameSizeSamples == 256, got {voxCpuLowLat.FrameSizeSamples}.");
+                    }
+                    VoiceprintProfileInfo? cpuLowLatProfile = voxCpuLowLat.LoadOrRebuildVoiceprintCache(enrolled.SourceWavPath, forceRebuild: false);
+                    if (cpuLowLatProfile is null || !voxCpuLowLat.HasEnrolledVoiceprint)
+                    {
+                        throw new InvalidOperationException("CPU Low-Latency VoxLock failed to load enrolled voiceprint.");
+                    }
+                    RunCascadeBenchmark("CPU P-Core Low-Latency (VAD+GTCRN+VoxLock 16ms INT8 K=2)", vadCpu, gtcrnCpu, voxCpuLowLat, affinity, pCoreMask, pCoreGroup, Log);
+                }
+
+                if (cudaAvailable)
+                {
+                    using var voxCudaFp16 = new VoxLockOnnxBackend();
+                    var cudaFp16Options = new AudioStageOptions(
+                        AppContext.BaseDirectory,
+                        manifest,
+                        ComputeBackend.Cuda,
+                        VoxLockModelVariant.Fp16,
+                        0.5f,
+                        VoxLockHopsPerChunk: 4);
+                    voxCudaFp16.Initialize(cudaFp16Options);
+                    VoiceprintProfileInfo? cudaFp16Profile = voxCudaFp16.LoadOrRebuildVoiceprintCache(enrolled.SourceWavPath, forceRebuild: false);
+                    if (cudaFp16Profile is null || !voxCudaFp16.HasEnrolledVoiceprint)
+                    {
+                        throw new InvalidOperationException("CUDA FP16 VoxLock failed to load enrolled voiceprint.");
+                    }
+                    RunCascadeBenchmark("Hybrid CUDA (CPU VAD+GTCRN + CUDA VoxLock 32ms FP16 K=4)", vadCpu, gtcrnCpu, voxCudaFp16, null, 0, 0, Log);
+
+                    // Verify concurrent CUDA ProcessFrame + voiceprint reload/refresh has no OrtIoBinding race.
+                    int cudaFrameSize = voxCudaFp16.FrameSizeSamples;
+                    float[] concIn = new float[cudaFrameSize];
+                    float[] concOut = new float[cudaFrameSize];
+                    for (int i = 0; i < cudaFrameSize; i++)
+                    {
+                        concIn[i] = 0.25f * MathF.Sin(2f * MathF.PI * 220f * i / 16000f);
+                    }
+
+                    using var ctsConc = new CancellationTokenSource();
+                    Task inferTask = Task.Run(() =>
+                    {
+                        for (int iter = 0; iter < 40 && !ctsConc.IsCancellationRequested; iter++)
+                        {
+                            voxCudaFp16.ProcessFrame(concIn, concOut);
+                            if (!float.IsFinite(concOut[0]))
+                            {
+                                throw new InvalidDataException($"Non-finite CUDA concurrent output: {concOut[0]}");
+                            }
+                        }
+                    });
+                    try
+                    {
+                        for (int r = 0; r < 3; r++)
+                        {
+                            voxCudaFp16.LoadOrRebuildVoiceprintCache(enrolled.SourceWavPath, forceRebuild: false);
+                        }
+                    }
+                    finally
+                    {
+                        ctsConc.Cancel();
+                        await inferTask;
+                    }
+                    Log("[PASS] CUDA Concurrent ProcessFrame + ReloadVoiceprintCache Safety Check");
                 }
 
                 // Verify AudioRingBuffer Drop-Oldest watermark semantics
@@ -268,12 +350,14 @@ public static class SelfTestRunner
                     window.Close();
                 }
 
+                await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
                 Log($"[PASS] UI/ViewModel/DWM Smoke Test: Captures={vm.CaptureDevices.Count}, Renders={vm.RenderDevices.Count}, Cores={vm.CoreMatrixItems.Count}, MicaSupported={DwmBackdropHelper.IsMicaSupported}, DarkTheme={darkTheme}");
             }
 
-            Log("=== ALL SELF-TESTS PASSED (EXIT 0) ===");
             GC.Collect();
             GC.WaitForPendingFinalizers();
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            Log("=== ALL SELF-TESTS PASSED (EXIT 0) ===");
             return 0;
         }
         catch (Exception ex)
@@ -332,6 +416,7 @@ public static class SelfTestRunner
                 double voxTotalMs = 0;
                 int voxRuns = 0;
                 double firstVoxMs = 0;
+                bool hasNonZeroOutput = false;
 
                 for (int h = 0; h < measuredHops; h++)
                 {
@@ -381,12 +466,23 @@ public static class SelfTestRunner
 
                         for (int i = 0; i < voxFrameSize; i++)
                         {
-                            if (!float.IsFinite(voxOut[i]))
+                            float sample = voxOut[i];
+                            if (!float.IsFinite(sample))
                             {
-                                throw new InvalidDataException($"Non-finite output sample detected at chunk {voxRuns}, index {i} ({voxOut[i]}).");
+                                throw new InvalidDataException($"Non-finite output sample detected at chunk {voxRuns}, index {i} ({sample}).");
+                            }
+
+                            if (MathF.Abs(sample) > 1e-6f)
+                            {
+                                hasNonZeroOutput = true;
                             }
                         }
                     }
+                }
+
+                if (!hasNonZeroOutput)
+                {
+                    throw new InvalidDataException($"Cascade output remained zero across all {voxRuns} chunks for '{label}'.");
                 }
 
                 double avgVad = vadRuns > 0 ? vadTotalMs / vadRuns : 0.0;

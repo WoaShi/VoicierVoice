@@ -59,6 +59,7 @@ public sealed class AppSettings
 
     public bool VoxLockEnabled { get; set; } = true;
     public VoxLockModelVariant VoxLockVariant { get; set; } = VoxLockModelVariant.Int8;
+    public bool VoxLockLowLatencyMode { get; set; }
 
     public ComputeBackend ComputeBackend { get; set; } = ComputeBackend.Cpu;
 
@@ -99,6 +100,7 @@ public sealed class AppSettings
         GtcrnEnabled = GtcrnEnabled,
         VoxLockEnabled = VoxLockEnabled,
         VoxLockVariant = VoxLockVariant,
+        VoxLockLowLatencyMode = VoxLockLowLatencyMode,
         ComputeBackend = ComputeBackend,
         AutoAffinityEnabled = AutoAffinityEnabled,
         SelectedCoreMask = SelectedCoreMask,

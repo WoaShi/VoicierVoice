@@ -68,12 +68,57 @@ public sealed class CpuAffinityManager
     /// Computes the recommended affinity mask: all E-Cores when heterogeneous, or the last 2 logical cores
     /// when all cores share the same <c>EfficiencyClass</c> (e.g. AMD Ryzen).
     /// </summary>
-    public ulong GetRecommendedAudioWorkerMask(out ushort processorGroup, out string description)
+    public ulong GetRecommendedAudioWorkerMask(
+        out ushort processorGroup,
+        out string description,
+        bool preferPerformanceCores = false)
     {
         CpuTopologyInfo topology = GetTopology();
+        if (preferPerformanceCores &&
+            TryGetPerformanceCoresMask(topology, out ulong pCoreMask, out ushort pCoreGroup, out int pCoreCount))
+        {
+            processorGroup = pCoreGroup;
+            description = $"Auto P-Cores ({pCoreCount} cores)";
+            return pCoreMask;
+        }
+
         processorGroup = topology.RecommendedProcessorGroup;
         description = topology.RecommendedDescription;
         return topology.RecommendedCoreMask;
+    }
+
+    private static bool TryGetPerformanceCoresMask(
+        CpuTopologyInfo topology,
+        out ulong pCoreMask,
+        out ushort pCoreGroup,
+        out int pCoreCount)
+    {
+        pCoreMask = 0;
+        pCoreGroup = topology.RecommendedProcessorGroup;
+        pCoreCount = 0;
+
+        if (!topology.IsHeterogeneous)
+        {
+            return false;
+        }
+
+        PhysicalCoreInfo? firstPCore = topology.PhysicalCores.FirstOrDefault(c => !c.IsEfficiencyCore);
+        if (firstPCore is null)
+        {
+            return false;
+        }
+
+        pCoreGroup = firstPCore.ProcessorGroup;
+        foreach (PhysicalCoreInfo core in topology.PhysicalCores)
+        {
+            if (!core.IsEfficiencyCore && core.ProcessorGroup == pCoreGroup)
+            {
+                pCoreMask |= core.LogicalProcessorMask;
+                pCoreCount++;
+            }
+        }
+
+        return pCoreMask != 0;
     }
 
     /// <summary>
@@ -165,9 +210,151 @@ public sealed class CpuAffinityManager
         return ids;
     }
 
-    public int BindNewProcessThreads(HashSet<int> baselineThreadIds, ulong mask, ushort processorGroup = 0)
+    public static List<int> GetNewProcessThreadIds(HashSet<int> baselineThreadIds, int maxExpectedThreads = 0)
     {
-        if (mask == 0)
+        using Process proc = Process.GetCurrentProcess();
+        var modules = SnapshotProcessModules(proc);
+        var candidates = new List<(int ThreadId, int Tier)>();
+
+        foreach (ProcessThread t in proc.Threads)
+        {
+            if (baselineThreadIds.Contains(t.Id))
+            {
+                continue;
+            }
+
+            string? moduleName = TryResolveThreadStartModule(t, modules);
+            if (IsExcludedRuntimeOrAudioModule(moduleName))
+            {
+                continue;
+            }
+
+            int tier = ClassifyThreadModuleTier(moduleName);
+            candidates.Add((t.Id, tier));
+        }
+
+        if (candidates.Count <= 1)
+        {
+            return candidates.ConvertAll(c => c.ThreadId);
+        }
+
+        candidates.Sort(static (a, b) =>
+        {
+            int tierCmp = a.Tier.CompareTo(b.Tier);
+            return tierCmp != 0 ? tierCmp : a.ThreadId.CompareTo(b.ThreadId);
+        });
+
+        int limit = maxExpectedThreads > 0 ? Math.Min(candidates.Count, maxExpectedThreads) : candidates.Count;
+        var result = new List<int>(limit);
+        for (int i = 0; i < limit; i++)
+        {
+            result.Add(candidates[i].ThreadId);
+        }
+        return result;
+    }
+
+    private static List<(ulong Start, ulong End, string Name)> SnapshotProcessModules(Process proc)
+    {
+        var list = new List<(ulong, ulong, string)>();
+        try
+        {
+            foreach (ProcessModule module in proc.Modules)
+            {
+                ulong start = unchecked((ulong)module.BaseAddress.ToInt64());
+                ulong end = start + (uint)module.ModuleMemorySize;
+                if (start != 0 && end > start && !string.IsNullOrEmpty(module.ModuleName))
+                {
+                    list.Add((start, end, module.ModuleName));
+                }
+            }
+        }
+        catch
+        {
+            // Ignore module enumeration races; thread filtering will fall back safely.
+        }
+        return list;
+    }
+
+    private static string? TryResolveThreadStartModule(
+        ProcessThread thread,
+        List<(ulong Start, ulong End, string Name)> modules)
+    {
+        if (modules.Count == 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            ulong addr = unchecked((ulong)thread.StartAddress.ToInt64());
+            if (addr == 0)
+            {
+                return null;
+            }
+
+            for (int i = 0; i < modules.Count; i++)
+            {
+                if (addr >= modules[i].Start && addr < modules[i].End)
+                {
+                    return modules[i].Name;
+                }
+            }
+        }
+        catch
+        {
+            // Thread may exit or deny StartAddress query during enumeration.
+        }
+
+        return null;
+    }
+
+    private static bool IsExcludedRuntimeOrAudioModule(string? moduleName)
+    {
+        if (string.IsNullOrEmpty(moduleName))
+        {
+            return false;
+        }
+
+        return moduleName.Contains("coreclr", StringComparison.OrdinalIgnoreCase)
+            || moduleName.Equals("clr.dll", StringComparison.OrdinalIgnoreCase)
+            || moduleName.Contains("clrjit", StringComparison.OrdinalIgnoreCase)
+            || moduleName.Contains("hostpolicy", StringComparison.OrdinalIgnoreCase)
+            || moduleName.Contains("hostfxr", StringComparison.OrdinalIgnoreCase)
+            || moduleName.Equals("mmdevapi.dll", StringComparison.OrdinalIgnoreCase)
+            || moduleName.Equals("audioses.dll", StringComparison.OrdinalIgnoreCase)
+            || moduleName.Equals("wdmaud.drv", StringComparison.OrdinalIgnoreCase)
+            || moduleName.Equals("avrt.dll", StringComparison.OrdinalIgnoreCase)
+            || moduleName.StartsWith("wpfgfx", StringComparison.OrdinalIgnoreCase)
+            || moduleName.StartsWith("presentationnative", StringComparison.OrdinalIgnoreCase)
+            || moduleName.Equals("dwmapi.dll", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static int ClassifyThreadModuleTier(string? moduleName)
+    {
+        if (string.IsNullOrEmpty(moduleName))
+        {
+            return 2;
+        }
+
+        if (moduleName.Contains("onnxruntime", StringComparison.OrdinalIgnoreCase))
+        {
+            return 0;
+        }
+
+        if (moduleName.StartsWith("ucrtbase", StringComparison.OrdinalIgnoreCase)
+            || moduleName.StartsWith("msvcrt", StringComparison.OrdinalIgnoreCase)
+            || moduleName.StartsWith("msvcp", StringComparison.OrdinalIgnoreCase)
+            || moduleName.StartsWith("vcruntime", StringComparison.OrdinalIgnoreCase))
+        {
+            return 1;
+        }
+
+        return 2;
+    }
+
+    public int BindSpecificThreads(IReadOnlyList<int> threadIds, ulong mask, ushort processorGroup = 0)
+    {
+        if (mask == 0 || threadIds.Count == 0)
         {
             return 0;
         }
@@ -176,18 +363,12 @@ public sealed class CpuAffinityManager
         CpuTopologyInfo topology = GetTopology();
         bool useGroupAffinity = processorGroup > 0 || topology.ProcessorGroupCount > 1;
 
-        using Process proc = Process.GetCurrentProcess();
-        foreach (ProcessThread t in proc.Threads)
+        for (int i = 0; i < threadIds.Count; i++)
         {
-            if (baselineThreadIds.Contains(t.Id))
-            {
-                continue;
-            }
-
             IntPtr hThread = NativeMethods.OpenThread(
                 NativeMethods.ThreadSetInformation | NativeMethods.ThreadQueryInformation,
                 false,
-                (uint)t.Id);
+                (uint)threadIds[i]);
             if (hThread == IntPtr.Zero)
             {
                 continue;
@@ -222,6 +403,17 @@ public sealed class CpuAffinityManager
         }
 
         return boundCount;
+    }
+
+    public int BindNewProcessThreads(HashSet<int> baselineThreadIds, ulong mask, ushort processorGroup = 0)
+    {
+        if (mask == 0)
+        {
+            return 0;
+        }
+
+        List<int> newIds = GetNewProcessThreadIds(baselineThreadIds);
+        return BindSpecificThreads(newIds, mask, processorGroup);
     }
 
     private static UIntPtr ToNativeAffinityMask(ulong mask)
@@ -482,6 +674,13 @@ public sealed class CpuAffinityManager
         if (mask == topology.RecommendedCoreMask && group == topology.RecommendedProcessorGroup)
         {
             return topology.RecommendedDescription;
+        }
+
+        if (TryGetPerformanceCoresMask(topology, out ulong pCoreMask, out ushort pCoreGroup, out int pCoreCount) &&
+            mask == pCoreMask &&
+            group == pCoreGroup)
+        {
+            return $"Auto P-Cores ({pCoreCount} cores)";
         }
 
         string prefix = topology.ProcessorGroupCount > 1 ? $"G{group} " : string.Empty;

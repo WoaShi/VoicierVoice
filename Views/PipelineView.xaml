@@ -281,10 +281,11 @@
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                                    VerticalAlignment="Center" />
                         <ProgressBar Grid.Column="1"
+                                     Style="{StaticResource RoundedLevelProgressBarStyle}"
                                      Minimum="0"
                                      Maximum="100"
                                      Value="{Binding InputLevelPercent, Mode=OneWay}"
-                                     Height="5"
+                                     Height="6"
                                      VerticalAlignment="Center" />
                     </Grid>
 
@@ -301,10 +302,11 @@
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                                    VerticalAlignment="Center" />
                         <ProgressBar Grid.Column="1"
+                                     Style="{StaticResource RoundedLevelProgressBarStyle}"
                                      Minimum="0"
                                      Maximum="100"
                                      Value="{Binding OutputLevelPercent, Mode=OneWay}"
-                                     Height="5"
+                                     Height="6"
                                      VerticalAlignment="Center" />
                     </Grid>
                 </Grid>
@@ -528,58 +530,80 @@
 
         <!-- Stage 3: VoxLock -->
         <Border Style="{StaticResource GallerySettingsRowStyle}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
+            <StackPanel>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
 
-                <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,14,0">
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding Source={x:Static loc:AppStrings.Current}, Path=VoxLockStageTitle}"
-                                   FontWeight="{Binding Source={x:Static loc:AppStrings.Current}, Path=StrongFontWeight}"
-                                   FontSize="13.5"
-                                   VerticalAlignment="Center"
-                                   Margin="0,0,6,0" />
-                        <controls:InfoHintBadge HintText="{Binding Source={x:Static loc:AppStrings.Current}, Path=VoxLockStageHint}" />
+                    <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,14,0">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Source={x:Static loc:AppStrings.Current}, Path=VoxLockStageTitle}"
+                                       FontWeight="{Binding Source={x:Static loc:AppStrings.Current}, Path=StrongFontWeight}"
+                                       FontSize="13.5"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,6,0" />
+                            <controls:InfoHintBadge HintText="{Binding Source={x:Static loc:AppStrings.Current}, Path=VoxLockStageHint}" />
+                        </StackPanel>
+                        <TextBlock Text="{Binding Source={x:Static loc:AppStrings.Current}, Path=VoxLockStageSummary}"
+                                   FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   Margin="0,4,0,0" />
                     </StackPanel>
-                    <TextBlock Text="{Binding Source={x:Static loc:AppStrings.Current}, Path=VoxLockStageSummary}"
-                               FontSize="12"
-                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                               Margin="0,4,0,0" />
-                </StackPanel>
 
-                <StackPanel Grid.Column="1"
-                            Orientation="Horizontal"
-                            VerticalAlignment="Center"
-                            Margin="0,0,14,0">
-                    <controls:InfoHintBadge HintText="{Binding Source={x:Static loc:AppStrings.Current}, Path=VoxLockVariantHint}"
-                                            Margin="0,0,6,0" />
-                    <ComboBox Width="195"
-                              ItemsSource="{Binding VoxLockVariants}"
-                              SelectedItem="{Binding SelectedVoxLockVariant, Mode=TwoWay}"
-                              IsEnabled="{Binding VoxLockEnabled}"
-                              VerticalAlignment="Center">
-                        <ComboBox.ItemTemplate>
-                            <DataTemplate>
-                                <TextBlock VerticalAlignment="Center">
-                                    <TextBlock.Text>
-                                        <MultiBinding Converter="{StaticResource VoxLockVariantLabelConverter}">
-                                            <Binding />
-                                            <Binding Source="{x:Static loc:AppStrings.Current}" Path="Language" />
-                                        </MultiBinding>
-                                    </TextBlock.Text>
-                                </TextBlock>
-                            </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                    </ComboBox>
-                </StackPanel>
+                    <StackPanel Grid.Column="1"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center"
+                                Margin="0,0,14,0">
+                        <controls:InfoHintBadge HintText="{Binding Source={x:Static loc:AppStrings.Current}, Path=VoxLockVariantHint}"
+                                                Margin="0,0,6,0" />
+                        <ComboBox Width="195"
+                                  ItemsSource="{Binding VoxLockVariants}"
+                                  SelectedItem="{Binding SelectedVoxLockVariant, Mode=TwoWay}"
+                                  IsEnabled="{Binding VoxLockEnabled}"
+                                  VerticalAlignment="Center">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock VerticalAlignment="Center">
+                                        <TextBlock.Text>
+                                            <MultiBinding Converter="{StaticResource VoxLockVariantLabelConverter}">
+                                                <Binding />
+                                                <Binding Source="{x:Static loc:AppStrings.Current}" Path="Language" />
+                                            </MultiBinding>
+                                        </TextBlock.Text>
+                                    </TextBlock>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </StackPanel>
 
-                <CheckBox Grid.Column="2"
-                          Style="{StaticResource FluentToggleSwitchStyle}"
-                          IsChecked="{Binding VoxLockEnabled, Mode=TwoWay}" />
-            </Grid>
+                    <CheckBox Grid.Column="2"
+                              Style="{StaticResource FluentToggleSwitchStyle}"
+                              IsChecked="{Binding VoxLockEnabled, Mode=TwoWay}" />
+                </Grid>
+
+                <Grid Margin="0,12,0,0" IsEnabled="{Binding VoxLockEnabled}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,14,0">
+                        <TextBlock Text="{Binding Source={x:Static loc:AppStrings.Current}, Path=VoxLockLowLatencyLabel}"
+                                   FontSize="12.5"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,5,0" />
+                        <controls:InfoHintBadge HintText="{Binding Source={x:Static loc:AppStrings.Current}, Path=VoxLockLowLatencyHint}" />
+                    </StackPanel>
+
+                    <CheckBox Grid.Column="1"
+                              Style="{StaticResource FluentToggleSwitchStyle}"
+                              IsChecked="{Binding VoxLockLowLatencyMode, Mode=TwoWay}" />
+                </Grid>
+            </StackPanel>
         </Border>
 
     </StackPanel>

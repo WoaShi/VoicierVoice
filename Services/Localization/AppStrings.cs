@@ -51,7 +51,7 @@ public sealed class AppStrings : ObservableObject
     public string NavOtherTitle => L("其他设置", "Other Settings");
 
     // Master Switch & Telemetry
-    public string MasterSwitchTitle => L("实时声纹提取", "Live Voice Isolation");
+    public string MasterSwitchTitle => L("降噪开关", "Noise Reduction");
     public string MasterSwitchTooltip => L(
         "开启或关闭实时级联降噪与声纹提取管线",
         "Start or stop the real-time cascade denoising and voiceprint isolation pipeline");
@@ -141,9 +141,13 @@ public sealed class AppStrings : ObservableObject
     public string VoxLockVariantHint => L(
         "INT8 兼顾极低延迟与日常精度；INT8 Full 提供更完整权重量化；FP16 适合 CUDA GPU 高精度推理。",
         "INT8 balances ultra-low latency and quality; INT8 Full uses full quantized weights; FP16 targets CUDA GPU precision.");
+    public string VoxLockLowLatencyLabel => L("16 ms 超低延迟分块 (CPU)", "16 ms Low-Latency Chunk (CPU)");
+    public string VoxLockLowLatencyHint => L(
+        "CPU 模式下将 VoxLock 分块从 32 ms 缩减至 16 ms（总延迟再降 ~28 ms），自动调度至高性能 P 核；CUDA 模式保持 32 ms 分块以规避 GPU 调度抖动。",
+        "Under CPU mode, halves VoxLock chunks from 32 ms to 16 ms (~28 ms lower total latency) using P-cores; CUDA stays at 32 ms chunks for optimal GPU stability.");
 
     // Voiceprint Tab
-    public string VoiceprintCardTitle => L("个人声纹档案", "Voiceprint Profile");
+    public string VoiceprintCardTitle => L("声纹", "Voiceprint");
     public string VoiceprintCardHint => L(
         "录制 5 秒个人人声样本并生成与模型精度匹配的本地特征缓存，全程离线保存。",
         "Records a 5-second voice sample and builds a hash-verified local embedding cache offline.");
@@ -189,14 +193,14 @@ public sealed class AppStrings : ObservableObject
     public string VoiceprintPromptDetail => L("请朗读上方引导文本并点击录制按钮", "Read the prompt above and click Record Voiceprint");
 
     // Compute & Cores Tab
-    public string ComputeCardTitle => L("推理算力后端与核心调度", "Compute Backend & Core Affinity");
+    public string ComputeCardTitle => L("推理负载偏好", "Inference Load Preference");
 
-    public string ComputeGuideTitle => L("算力调度建议", "Compute Guidance");
+    public string ComputeGuideTitle => L("建议", "Guidance");
     public string ComputeGuideBody => L(
         "运行大型 3D 游戏时，推荐使用 CPU 单线程锁核至能效核，可避免与游戏争抢显卡资源导致的帧率波动；追求极致分离精度或启用 FP16 模型时，可切换至 CUDA GPU 加速。",
         "While playing demanding 3D games, CPU Single-Thread E-Core locking avoids GPU contention and frame-time drops. Switch to CUDA GPU acceleration for maximum separation quality or FP16 inference.");
 
-    public string CpuBackendTitle => L("CPU 单线程锁核", "CPU Single-Thread Lock");
+    public string CpuBackendTitle => L("CPU", "CPU");
     public string CpuBackendSubtitle => L("低延迟零拷贝，稳定控制实时语音抖动", "Low latency, zero-copy, stable frame pacing");
     public string CpuBackendBadge => L("推荐", "Recommended");
     public string CpuBackendHint => L(
@@ -335,6 +339,12 @@ public sealed class AppStrings : ObservableObject
         {
             int eCoreCount = topology.PhysicalCores.Count(c => c.IsEfficiencyCore);
             return L($"自动锁定 E-Core {eCoreCount} 核", $"Auto E-Core, {eCoreCount} cores");
+        }
+
+        if (rawDescription.StartsWith("Auto P-Cores", StringComparison.OrdinalIgnoreCase))
+        {
+            int pCoreCount = topology.PhysicalCores.Count(c => !c.IsEfficiencyCore);
+            return L($"自动锁定 P-Core {pCoreCount} 核", $"Auto P-Core, {pCoreCount} cores");
         }
 
         if (rawDescription.StartsWith("Auto Tail Cores", StringComparison.OrdinalIgnoreCase))
