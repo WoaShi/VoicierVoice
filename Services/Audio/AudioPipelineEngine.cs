@@ -95,6 +95,7 @@ public sealed class AudioPipelineEngine : IDisposable
 
     private Thread? _dspThread;
     private CancellationTokenSource? _runCts;
+    private IDisposable? _processAudioBoostScope;
     private volatile bool _isRunning;
     private bool _disposed;
 
@@ -247,6 +248,7 @@ public sealed class AudioPipelineEngine : IDisposable
 
             try
             {
+                _processAudioBoostScope ??= CpuAffinityManager.BeginProcessAudioBoost();
                 _inputRing16k.Reset();
                 _primaryOutRing.Reset();
                 _monitorOutRing.Reset();
@@ -423,6 +425,8 @@ public sealed class AudioPipelineEngine : IDisposable
         _primaryRenderDevice?.Dispose();
         _primaryRenderDevice = null;
         _primaryRenderDeviceId = null;
+
+        Interlocked.Exchange(ref _processAudioBoostScope, null)?.Dispose();
     }
 
     private void TryStartMonitorOutputLocked()
@@ -566,9 +570,10 @@ public sealed class AudioPipelineEngine : IDisposable
     private void DspWorkerLoop(object? state)
     {
         var token = (CancellationToken)state!;
+        using CpuAffinityManager.MmcssAudioScope? mmcssScope = CpuAffinityManager.TryRegisterCurrentThreadProAudio();
         try
         {
-            ApplyAffinityOnDspThread();
+            ApplyAffinityOnDspThread(mmcssScope);
             _vadStage?.Warmup();
             _gtcrnStage?.Warmup();
             _voxLockBackend?.Warmup();
@@ -606,7 +611,7 @@ public sealed class AudioPipelineEngine : IDisposable
                 if (_affinityUpdatePending)
                 {
                     _affinityUpdatePending = false;
-                    ApplyAffinityOnDspThread();
+                    ApplyAffinityOnDspThread(mmcssScope);
                 }
 
                 if (_inputRing16k.AvailableRead < HopSizeSamples)
@@ -840,6 +845,7 @@ public sealed class AudioPipelineEngine : IDisposable
         catch (Exception ex) when (!token.IsCancellationRequested)
         {
             _isRunning = false;
+            Interlocked.Exchange(ref _processAudioBoostScope, null)?.Dispose();
             PublishTelemetry(LatestTelemetry with
             {
                 TimestampUtc = DateTimeOffset.UtcNow,
@@ -851,7 +857,7 @@ public sealed class AudioPipelineEngine : IDisposable
         }
     }
 
-    private void ApplyAffinityOnDspThread()
+    private void ApplyAffinityOnDspThread(CpuAffinityManager.MmcssAudioScope? mmcssScope = null)
     {
         bool preferPCores = (_voxLockBackend?.FrameSizeSamples ?? 512) <= 256
             && _activeComputeBackend != ComputeBackend.Cuda;
@@ -873,6 +879,7 @@ public sealed class AudioPipelineEngine : IDisposable
         }
 
         AffinityBindResult result = _affinityManager.BindCurrentThread(mask, ThreadPriority.AboveNormal, group);
+        mmcssScope?.ReinforcePriority();
         _voxLockBackend?.UpdateCpuAffinity(result.AppliedMask, group);
         Volatile.Write(ref _activeCoreDescription, result.Description);
         Volatile.Write(ref _activeCoreMask, unchecked((long)result.AppliedMask));

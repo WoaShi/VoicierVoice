@@ -50,6 +50,10 @@ public sealed class CpuAffinityManager
 {
     private const int ErrorInsufficientBuffer = 122;
     private const byte LtpPcSmt = 0x01;
+    private static readonly object ProcessBoostSync = new();
+    private static int _processBoostRefCount;
+    private static ProcessPriorityClass? _savedProcessPriorityClass;
+    private static bool _powerThrottlingDisabled;
 
     private CpuTopologyInfo? _cachedTopology;
 
@@ -352,9 +356,13 @@ public sealed class CpuAffinityManager
         return 2;
     }
 
-    public int BindSpecificThreads(IReadOnlyList<int> threadIds, ulong mask, ushort processorGroup = 0)
+    public int BindSpecificThreads(
+        IReadOnlyList<int> threadIds,
+        ulong mask,
+        ushort processorGroup = 0,
+        ThreadPriority priority = ThreadPriority.AboveNormal)
     {
-        if (mask == 0 || threadIds.Count == 0)
+        if (threadIds.Count == 0)
         {
             return 0;
         }
@@ -362,6 +370,7 @@ public sealed class CpuAffinityManager
         int boundCount = 0;
         CpuTopologyInfo topology = GetTopology();
         bool useGroupAffinity = processorGroup > 0 || topology.ProcessorGroupCount > 1;
+        int win32Priority = ToWin32ThreadPriority(priority);
 
         for (int i = 0; i < threadIds.Count; i++)
         {
@@ -376,6 +385,17 @@ public sealed class CpuAffinityManager
 
             try
             {
+                bool prioritySet = NativeMethods.SetThreadPriority(hThread, win32Priority);
+
+                if (mask == 0)
+                {
+                    if (prioritySet)
+                    {
+                        boundCount++;
+                    }
+                    continue;
+                }
+
                 if (!useGroupAffinity)
                 {
                     if (NativeMethods.SetThreadAffinityMask(hThread, ToNativeAffinityMask(mask)) != UIntPtr.Zero)
@@ -403,6 +423,205 @@ public sealed class CpuAffinityManager
         }
 
         return boundCount;
+    }
+
+    /// <summary>
+    /// Ref-counted scope that temporarily elevates the process to <see cref="ProcessPriorityClass.High"/>
+    /// and disables Windows EcoQoS power throttling while real-time audio processing is active.
+    /// </summary>
+    public static IDisposable BeginProcessAudioBoost()
+    {
+        lock (ProcessBoostSync)
+        {
+            if (_processBoostRefCount == 0)
+            {
+                try
+                {
+                    using Process proc = Process.GetCurrentProcess();
+                    ProcessPriorityClass current = proc.PriorityClass;
+                    if (current != ProcessPriorityClass.High && current != ProcessPriorityClass.RealTime)
+                    {
+                        _savedProcessPriorityClass = current;
+                        proc.PriorityClass = ProcessPriorityClass.High;
+                    }
+                    else
+                    {
+                        _savedProcessPriorityClass = null;
+                    }
+
+                    _powerThrottlingDisabled = TrySetProcessPowerThrottling(proc.Handle, disableThrottling: true);
+                }
+                catch
+                {
+                    // Best-effort boost; continue running if restricted by OS policy.
+                }
+            }
+
+            _processBoostRefCount++;
+        }
+
+        return new ProcessAudioBoostScope();
+    }
+
+    private static void EndProcessAudioBoost()
+    {
+        lock (ProcessBoostSync)
+        {
+            if (_processBoostRefCount <= 0)
+            {
+                _processBoostRefCount = 0;
+                return;
+            }
+
+            _processBoostRefCount--;
+            if (_processBoostRefCount > 0)
+            {
+                return;
+            }
+
+            try
+            {
+                using Process proc = Process.GetCurrentProcess();
+                if (_savedProcessPriorityClass is { } original && proc.PriorityClass == ProcessPriorityClass.High)
+                {
+                    proc.PriorityClass = original;
+                }
+
+                if (_powerThrottlingDisabled)
+                {
+                    TryResetProcessPowerThrottling(proc.Handle);
+                }
+            }
+            catch
+            {
+                // Ignore teardown/permission errors when restoring priority.
+            }
+            finally
+            {
+                _savedProcessPriorityClass = null;
+                _powerThrottlingDisabled = false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Registers the calling thread with the Windows MMCSS "Pro Audio" scheduler task and raises
+    /// its MMCSS priority to <c>AVRT_PRIORITY_HIGH</c>. Must be disposed on the same thread.
+    /// </summary>
+    public static MmcssAudioScope? TryRegisterCurrentThreadProAudio()
+    {
+        try
+        {
+            uint taskIndex = 0;
+            IntPtr handle = NativeMethods.AvSetMmThreadCharacteristicsW("Pro Audio", ref taskIndex);
+            if (handle == IntPtr.Zero)
+            {
+                return null;
+            }
+
+            NativeMethods.AvSetMmThreadPriority(handle, NativeMethods.AvrtPriorityHigh);
+            return new MmcssAudioScope(handle);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public sealed class MmcssAudioScope : IDisposable
+    {
+        private IntPtr _handle;
+
+        internal MmcssAudioScope(IntPtr handle)
+        {
+            _handle = handle;
+        }
+
+        public void ReinforcePriority()
+        {
+            IntPtr handle = _handle;
+            if (handle != IntPtr.Zero)
+            {
+                try
+                {
+                    NativeMethods.AvSetMmThreadPriority(handle, NativeMethods.AvrtPriorityHigh);
+                }
+                catch
+                {
+                    // Ignore best-effort MMCSS priority refresh failures.
+                }
+            }
+        }
+
+        public void Dispose()
+        {
+            IntPtr handle = Interlocked.Exchange(ref _handle, IntPtr.Zero);
+            if (handle != IntPtr.Zero)
+            {
+                try
+                {
+                    NativeMethods.AvRevertMmThreadCharacteristics(handle);
+                }
+                catch
+                {
+                    // Ignore MMCSS teardown failures.
+                }
+            }
+        }
+    }
+
+    private sealed class ProcessAudioBoostScope : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                EndProcessAudioBoost();
+            }
+        }
+    }
+
+    private static int ToWin32ThreadPriority(ThreadPriority priority) => priority switch
+    {
+        ThreadPriority.Lowest => NativeMethods.ThreadPriorityLowest,
+        ThreadPriority.BelowNormal => NativeMethods.ThreadPriorityBelowNormal,
+        ThreadPriority.AboveNormal => NativeMethods.ThreadPriorityAboveNormal,
+        ThreadPriority.Highest => NativeMethods.ThreadPriorityHighest,
+        _ => NativeMethods.ThreadPriorityNormal
+    };
+
+    private static bool TrySetProcessPowerThrottling(IntPtr processHandle, bool disableThrottling)
+    {
+        var state = new NativeMethods.ProcessPowerThrottlingState
+        {
+            Version = NativeMethods.ProcessPowerThrottlingCurrentVersion,
+            ControlMask = NativeMethods.ProcessPowerThrottlingExecutionSpeed,
+            StateMask = disableThrottling ? 0u : NativeMethods.ProcessPowerThrottlingExecutionSpeed
+        };
+
+        return NativeMethods.SetProcessInformation(
+            processHandle,
+            NativeMethods.ProcessPowerThrottling,
+            ref state,
+            (uint)Marshal.SizeOf<NativeMethods.ProcessPowerThrottlingState>());
+    }
+
+    private static void TryResetProcessPowerThrottling(IntPtr processHandle)
+    {
+        var state = new NativeMethods.ProcessPowerThrottlingState
+        {
+            Version = NativeMethods.ProcessPowerThrottlingCurrentVersion,
+            ControlMask = 0u,
+            StateMask = 0u
+        };
+
+        NativeMethods.SetProcessInformation(
+            processHandle,
+            NativeMethods.ProcessPowerThrottling,
+            ref state,
+            (uint)Marshal.SizeOf<NativeMethods.ProcessPowerThrottlingState>());
     }
 
     public int BindNewProcessThreads(HashSet<int> baselineThreadIds, ulong mask, ushort processorGroup = 0)
@@ -725,8 +944,51 @@ public sealed class CpuAffinityManager
         public const uint ThreadSetInformation = 0x0020;
         public const uint ThreadQueryInformation = 0x0040;
 
+        public const int ThreadPriorityLowest = -2;
+        public const int ThreadPriorityBelowNormal = -1;
+        public const int ThreadPriorityNormal = 0;
+        public const int ThreadPriorityAboveNormal = 1;
+        public const int ThreadPriorityHighest = 2;
+
+        public const int ProcessPowerThrottling = 4;
+        public const uint ProcessPowerThrottlingCurrentVersion = 1;
+        public const uint ProcessPowerThrottlingExecutionSpeed = 0x1;
+
+        public const int AvrtPriorityHigh = 1;
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct ProcessPowerThrottlingState
+        {
+            public uint Version;
+            public uint ControlMask;
+            public uint StateMask;
+        }
+
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern IntPtr OpenThread(uint dwDesiredAccess, bool bInheritHandle, uint dwThreadId);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool SetThreadPriority(IntPtr hThread, int nPriority);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool SetProcessInformation(
+            IntPtr hProcess,
+            int processInformationClass,
+            ref ProcessPowerThrottlingState processInformation,
+            uint processInformationSize);
+
+        [DllImport("avrt.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern IntPtr AvSetMmThreadCharacteristicsW(string taskName, ref uint taskIndex);
+
+        [DllImport("avrt.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool AvSetMmThreadPriority(IntPtr avrtHandle, int priority);
+
+        [DllImport("avrt.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool AvRevertMmThreadCharacteristics(IntPtr avrtHandle);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]

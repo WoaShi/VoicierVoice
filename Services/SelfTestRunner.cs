@@ -78,6 +78,35 @@ public static class SelfTestRunner
             }
             Log($"[PASS] CPU Topology: {topology.TotalLogicalProcessors} LP, {topology.PhysicalCores.Count} physical cores, Heterogeneous={topology.IsHeterogeneous}, Recommended='{topology.RecommendedDescription}' (Mask=0x{topology.RecommendedCoreMask:X}).");
 
+            // Verify Process Audio Boost + MMCSS Pro Audio registration & clean restore.
+            ProcessPriorityClass initialPriority;
+            ProcessPriorityClass boostedPriority;
+            ProcessPriorityClass restoredPriority;
+            bool mmcssRegistered;
+            using (var proc = Process.GetCurrentProcess())
+            {
+                initialPriority = proc.PriorityClass;
+                using (CpuAffinityManager.BeginProcessAudioBoost())
+                {
+                    proc.Refresh();
+                    boostedPriority = proc.PriorityClass;
+                    using CpuAffinityManager.MmcssAudioScope? mmcss = CpuAffinityManager.TryRegisterCurrentThreadProAudio();
+                    mmcssRegistered = mmcss is not null;
+                    mmcss?.ReinforcePriority();
+                }
+
+                proc.Refresh();
+                restoredPriority = proc.PriorityClass;
+            }
+
+            if ((initialPriority != ProcessPriorityClass.RealTime && boostedPriority != ProcessPriorityClass.High) ||
+                restoredPriority != initialPriority)
+            {
+                throw new InvalidOperationException(
+                    $"Process audio boost mismatch: initial={initialPriority}, boosted={boostedPriority}, restored={restoredPriority}.");
+            }
+            Log($"[PASS] Audio Scheduling Boost: Process={initialPriority}->{boostedPriority}->{restoredPriority}, MMCSS='Pro Audio' ({mmcssRegistered}).");
+
             // 3. Stage Initialization (E-Core-pinned CPU & CUDA)
             using var vadCpu = new SileroVadStage();
             using var gtcrnCpu = new GtcrnDenoiserStage();

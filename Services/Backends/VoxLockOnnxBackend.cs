@@ -214,14 +214,18 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
             if (baselineThreads is not null)
             {
                 _ortWorkerThreadIds = CpuAffinityManager.GetNewProcessThreadIds(baselineThreads, intraOpThreads);
-                if (options.CpuAffinityMask != 0 && _ortWorkerThreadIds.Count > 0)
+                if (_ortWorkerThreadIds.Count > 0)
                 {
                     new CpuAffinityManager().BindSpecificThreads(
                         _ortWorkerThreadIds,
                         options.CpuAffinityMask,
-                        options.ProcessorGroup);
-                    _lastBoundCoreMask = options.CpuAffinityMask;
-                    _lastBoundProcessorGroup = options.ProcessorGroup;
+                        options.ProcessorGroup,
+                        ThreadPriority.AboveNormal);
+                    if (options.CpuAffinityMask != 0)
+                    {
+                        _lastBoundCoreMask = options.CpuAffinityMask;
+                        _lastBoundProcessorGroup = options.ProcessorGroup;
+                    }
                 }
             }
 
@@ -425,7 +429,11 @@ public sealed class VoxLockOnnxBackend : IVoiceIsolatorBackend
                 return;
             }
 
-            new CpuAffinityManager().BindSpecificThreads(_ortWorkerThreadIds, coreMask, processorGroup);
+            new CpuAffinityManager().BindSpecificThreads(
+                _ortWorkerThreadIds,
+                coreMask,
+                processorGroup,
+                ThreadPriority.AboveNormal);
             _lastBoundCoreMask = coreMask;
             _lastBoundProcessorGroup = processorGroup;
         }
