@@ -73,6 +73,7 @@ public sealed class AppSettings
     public AppThemePreference ThemePreference { get; set; } = AppThemePreference.System;
     public bool MinimizeToTrayEnabled { get; set; } = true;
     public bool LaunchOnStartupEnabled { get; set; }
+    public bool PipelineActive { get; set; }
 
     public static string GetAppDataDirectory() =>
         Path.Combine(
@@ -109,7 +110,8 @@ public sealed class AppSettings
         Language = Language,
         ThemePreference = ThemePreference,
         MinimizeToTrayEnabled = MinimizeToTrayEnabled,
-        LaunchOnStartupEnabled = LaunchOnStartupEnabled
+        LaunchOnStartupEnabled = LaunchOnStartupEnabled,
+        PipelineActive = PipelineActive
     };
 
     public static AppSettings Load(string? path = null)

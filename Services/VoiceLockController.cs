@@ -132,6 +132,11 @@ public sealed class VoiceLockController : IDisposable
         {
             if (_pipelineEngine.IsRunning)
             {
+                if (!_settings.PipelineActive)
+                {
+                    _settings.PipelineActive = true;
+                    _settings.Save();
+                }
                 return;
             }
 
@@ -140,6 +145,9 @@ public sealed class VoiceLockController : IDisposable
                 _pipelineEngine.SetActiveBackend(ResolveActiveComputeBackend(), ActiveProviderSummary);
                 _pipelineEngine.Start(_settings);
             }, cancellationToken).ConfigureAwait(false);
+
+            _settings.PipelineActive = true;
+            _settings.Save();
         }
         finally
         {
@@ -157,12 +165,16 @@ public sealed class VoiceLockController : IDisposable
         await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (!_pipelineEngine.IsRunning)
+            if (_pipelineEngine.IsRunning)
             {
-                return;
+                await Task.Run(() => _pipelineEngine.Stop(), cancellationToken).ConfigureAwait(false);
             }
 
-            await Task.Run(() => _pipelineEngine.Stop(), cancellationToken).ConfigureAwait(false);
+            if (_settings.PipelineActive)
+            {
+                _settings.PipelineActive = false;
+                _settings.Save();
+            }
         }
         finally
         {

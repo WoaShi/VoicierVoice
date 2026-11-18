@@ -349,7 +349,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public event EventHandler? ExitRequested;
     public event EventHandler<GuidanceTarget>? GuidanceRequested;
 
-    public async Task InitializeAsync()
+    public async Task InitializeAsync(bool restorePipelineState = false)
     {
         if (_disposed)
         {
@@ -362,6 +362,24 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             await _controller.InitializeAsync();
             RefreshBackendBanner();
             RefreshVoiceprintStatus();
+
+            if (restorePipelineState && _controller.Settings.PipelineActive && !_disposed)
+            {
+                try
+                {
+                    StatusBadgeText = AppStrings.Current.StatusStarting;
+                    await EnsureSelectedDevicesAppliedAsync();
+                    await _controller.StartPipelineAsync();
+                    SetPipelineRunningFlagFromTelemetry(_controller.IsPipelineRunning);
+                }
+                catch (Exception ex)
+                {
+                    SetPipelineRunningFlagFromTelemetry(false);
+                    StatusKind = PipelineStatusKind.Faulted;
+                    _lastStatusError = ex.Message;
+                    StatusBadgeText = AppStrings.Current.FormatStatusFaulted(ex.Message);
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -971,6 +989,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             if (shouldRun)
             {
                 StatusBadgeText = AppStrings.Current.StatusStarting;
+                await EnsureSelectedDevicesAppliedAsync();
                 await _controller.StartPipelineAsync();
             }
             else
@@ -989,6 +1008,18 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             SetPipelineRunningFlagFromTelemetry(_controller.IsPipelineRunning);
             IsBusy = false;
+        }
+    }
+
+    private async Task EnsureSelectedDevicesAppliedAsync()
+    {
+        bool missingInput = string.IsNullOrWhiteSpace(_controller.Settings.SelectedInputDeviceId) && SelectedCaptureDevice is not null;
+        bool missingOutput = string.IsNullOrWhiteSpace(_controller.Settings.SelectedOutputDeviceId) && SelectedRenderDevice is not null;
+        if (missingInput || missingOutput)
+        {
+            await _controller.SetDevicesAsync(
+                SelectedCaptureDevice?.DeviceId,
+                SelectedRenderDevice?.DeviceId);
         }
     }
 

@@ -271,7 +271,7 @@ public static class SelfTestRunner
                 AppStrings.Current.SetLanguage(AppLanguage.EnUs);
                 if (!string.Equals(AppStrings.Current.NavPipelineTitle, "Home", StringComparison.Ordinal) ||
                     !string.Equals(AppStrings.Current.NavVoiceprintTitle, "Voiceprint", StringComparison.Ordinal) ||
-                    !string.Equals(AppStrings.Current.NavComputeTitle, "CPU&GPU", StringComparison.Ordinal))
+                    !string.Equals(AppStrings.Current.NavComputeTitle, "Usage Preference", StringComparison.Ordinal))
                 {
                     throw new InvalidOperationException("AppStrings failed to switch to EnUs.");
                 }
@@ -279,7 +279,7 @@ public static class SelfTestRunner
                 AppStrings.Current.SetLanguage(AppLanguage.ZhCn);
                 if (!string.Equals(AppStrings.Current.NavPipelineTitle, "主页", StringComparison.Ordinal) ||
                     !string.Equals(AppStrings.Current.NavVoiceprintTitle, "声纹", StringComparison.Ordinal) ||
-                    !string.Equals(AppStrings.Current.NavComputeTitle, "CPU&GPU", StringComparison.Ordinal))
+                    !string.Equals(AppStrings.Current.NavComputeTitle, "占用偏好", StringComparison.Ordinal))
                 {
                     throw new InvalidOperationException("AppStrings failed to switch to ZhCn.");
                 }
@@ -287,6 +287,23 @@ public static class SelfTestRunner
             finally
             {
                 AppStrings.Current.SetLanguage(originalLang);
+            }
+
+            string tempSettingsPath = Path.Combine(Path.GetTempPath(), $"voicier_selftest_{Guid.NewGuid():N}.json");
+            try
+            {
+                var saved = new AppSettings { PipelineActive = true };
+                AppSettings cloned = saved.Clone();
+                cloned.Save(tempSettingsPath);
+                AppSettings reloaded = AppSettings.Load(tempSettingsPath);
+                if (!reloaded.PipelineActive)
+                {
+                    throw new InvalidOperationException("AppSettings failed to roundtrip PipelineActive.");
+                }
+            }
+            finally
+            {
+                TryDeleteFile(tempSettingsPath);
             }
 
             using (var tray = new TrayIconService())

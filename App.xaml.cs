@@ -74,7 +74,7 @@ public partial class App : Application
 
         _trayIconService.UpdateStatus(_viewModel.StatusBadgeText, _viewModel.IsPipelineRunning);
 
-        await _viewModel.InitializeAsync();
+        await _viewModel.InitializeAsync(restorePipelineState: true);
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)

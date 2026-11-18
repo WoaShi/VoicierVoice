@@ -47,7 +47,7 @@ public sealed class AppStrings : ObservableObject
     // Sidebar Navigation Tabs
     public string NavPipelineTitle => L("主页", "Home");
     public string NavVoiceprintTitle => L("声纹", "Voiceprint");
-    public string NavComputeTitle => L("CPU&GPU", "CPU&GPU");
+    public string NavComputeTitle => L("占用偏好", "Usage Preference");
     public string NavOtherTitle => L("其他设置", "Other Settings");
 
     // Master Switch & Telemetry
@@ -97,8 +97,8 @@ public sealed class AppStrings : ObservableObject
 
     public string OutputDeviceLabel => L("输出设备", "Output Device");
     public string OutputDeviceHint => L(
-        "通过 WASAPI Render 输出处理后的纯净人声。接入会议或游戏语音时，建议选择 VB-Cable 或 VoiceMeeter 等虚拟声卡输出端点。",
-        "Outputs isolated speech via WASAPI Render. Select a virtual audio device such as VB-Cable or VoiceMeeter for voice apps.");
+        "建议选择虚拟声卡的Input端",
+        "Recommended: select the Input endpoint of a virtual audio device.");
 
     public string DeviceDefaultBadge => L("默认", "Default");
     public string DeviceVirtualBadge => L("虚拟声卡", "Virtual");
@@ -207,7 +207,7 @@ public sealed class AppStrings : ObservableObject
         "将 VAD、GTCRN 与 VoxLock 全部绑定在独立物理核心单线程运行，不占用显卡算力，极适合游戏开黑。",
         "Runs VAD, GTCRN, and VoxLock single-threaded on pinned physical cores with zero GPU usage.");
 
-    public string CudaBackendTitle => L("CUDA GPU 加速", "CUDA GPU Acceleration");
+    public string CudaBackendTitle => L("CUDA GPU", "CUDA GPU");
     public string CudaBackendSubtitle => L("使用 NVIDIA 显卡运行 VoxLock 推理", "Runs VoxLock ONNX inference on NVIDIA GPU");
     public string CudaBackendHint => L(
         "将 VoxLock 模型卸载至 NVIDIA CUDA 执行，轻量级 VAD 与 GTCRN 仍保留在 CPU 运行以规避小模型调度开销。",
@@ -414,7 +414,7 @@ public sealed class AppStrings : ObservableObject
 
     public string FormatVariantLabel(VoxLockModelVariant variant) => variant switch
     {
-        VoxLockModelVariant.Int8 => L("INT8 极速推荐", "INT8 Fast"),
+        VoxLockModelVariant.Int8 => L("INT8 快速", "INT8 Fast"),
         VoxLockModelVariant.Int8Full => "INT8 Full",
         VoxLockModelVariant.Fp16 => L("FP16 高精度", "FP16 Half Precision"),
         _ => variant.ToString()
