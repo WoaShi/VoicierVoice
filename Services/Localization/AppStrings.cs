@@ -141,10 +141,10 @@ public sealed class AppStrings : ObservableObject
     public string VoxLockVariantHint => L(
         "INT8 兼顾极低延迟与日常精度；INT8 Full 提供更完整权重量化；FP16 适合 CUDA GPU 高精度推理。",
         "INT8 balances ultra-low latency and quality; INT8 Full uses full quantized weights; FP16 targets CUDA GPU precision.");
-    public string VoxLockLowLatencyLabel => L("16 ms 超低延迟分块 (CPU)", "16 ms Low-Latency Chunk (CPU)");
+    public string VoxLockLowLatencyLabel => L("16 ms 超低延迟分块", "16 ms Low-Latency Chunk");
     public string VoxLockLowLatencyHint => L(
-        "CPU 模式下将 VoxLock 分块从 32 ms 缩减至 16 ms（总延迟再降 ~28 ms），自动调度至高性能 P 核；CUDA 模式保持 32 ms 分块以规避 GPU 调度抖动。",
-        "Under CPU mode, halves VoxLock chunks from 32 ms to 16 ms (~28 ms lower total latency) using P-cores; CUDA stays at 32 ms chunks for optimal GPU stability.");
+        "将 VoxLock 分块从 32 ms 缩减至 16 ms（总延迟再降 ~24 ms）；CPU 模式自动调度至高性能 P 核，CUDA 模式同步启用低延迟缓冲。",
+        "Halves VoxLock chunks from 32 ms to 16 ms (~24 ms lower total latency); CPU mode schedules on P-cores and CUDA mode uses low-latency buffering.");
 
     // Voiceprint Tab
     public string VoiceprintCardTitle => L("声纹", "Voiceprint");
@@ -350,6 +350,11 @@ public sealed class AppStrings : ObservableObject
         if (rawDescription.StartsWith("Auto Tail Cores", StringComparison.OrdinalIgnoreCase))
         {
             return L("自动锁定尾核", "Auto Tail Cores");
+        }
+
+        if (rawDescription.StartsWith("Auto All Cores", StringComparison.OrdinalIgnoreCase))
+        {
+            return L("自动全核释放", "Auto All Cores");
         }
 
         if (rawDescription.Length > 28)

@@ -45,18 +45,27 @@ public static class SelfTestRunner
 
         try
         {
-            // 1. ModelManifest & 7 ONNX files
+            // 1. ModelManifest & ONNX files
             ModelManifest manifest = ModelManifest.LoadDefault(AppContext.BaseDirectory);
             if (manifest.Models.Count != 7)
             {
                 throw new InvalidDataException($"Expected 7 ONNX models in manifest, found {manifest.Models.Count}.");
             }
 
+            bool allowTrimmedFp16 = RuntimeInformation.ProcessArchitecture == Architecture.Arm64;
+            int verifiedModels = 0;
             foreach (ModelEntry entry in manifest.Models)
             {
                 string fullPath = entry.ResolveFullPath(AppContext.BaseDirectory);
                 if (!File.Exists(fullPath))
                 {
+                    if (allowTrimmedFp16 &&
+                        (string.Equals(entry.Filename, "chunk_fp16.onnx", StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(entry.Filename, "enroll_fp16.onnx", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        continue;
+                    }
+
                     throw new FileNotFoundException($"Missing ONNX model file: {entry.Path}", fullPath);
                 }
 
@@ -66,8 +75,9 @@ public static class SelfTestRunner
                     throw new InvalidDataException(
                         $"Model '{entry.Filename}' size mismatch: disk={fi.Length}, manifest={entry.SizeBytes}.");
                 }
+                verifiedModels++;
             }
-            Log($"[PASS] Manifest verified: {manifest.Models.Count} ONNX models present and size-matched.");
+            Log($"[PASS] Manifest verified: {verifiedModels}/{manifest.Models.Count} ONNX models present and size-matched.");
 
             // 2. CpuAffinityManager topology
             var affinity = new CpuAffinityManager();
@@ -266,7 +276,95 @@ public static class SelfTestRunner
                         await inferTask;
                     }
                     Log("[PASS] CUDA Concurrent ProcessFrame + ReloadVoiceprintCache Safety Check");
+
+                    using var voxCudaLowLat = new VoxLockOnnxBackend();
+                    var cudaLowLatOptions = new AudioStageOptions(
+                        AppContext.BaseDirectory,
+                        manifest,
+                        ComputeBackend.Cuda,
+                        VoxLockModelVariant.Fp16,
+                        0.5f,
+                        VoxLockHopsPerChunk: 2);
+                    voxCudaLowLat.Initialize(cudaLowLatOptions);
+                    if (voxCudaLowLat.FrameSizeSamples != 256)
+                    {
+                        throw new InvalidOperationException($"Expected CUDA K=2 FrameSizeSamples == 256, got {voxCudaLowLat.FrameSizeSamples}.");
+                    }
+                    VoiceprintProfileInfo? cudaLowLatProfile = voxCudaLowLat.LoadOrRebuildVoiceprintCache(enrolled.SourceWavPath, forceRebuild: false);
+                    if (cudaLowLatProfile is null || !voxCudaLowLat.HasEnrolledVoiceprint)
+                    {
+                        throw new InvalidOperationException("CUDA Low-Latency FP16 VoxLock failed to load enrolled voiceprint.");
+                    }
+                    RunCascadeBenchmark("Hybrid CUDA Low-Latency (CPU VAD+GTCRN + CUDA VoxLock 16ms FP16 K=2)", vadCpu, gtcrnCpu, voxCudaLowLat, null, 0, 0, Log);
                 }
+
+                // Verify VoxLock SoftResetStreamingBuffers preserves speaker state without cold stall
+                {
+                    int frameLen = voxCpu.FrameSizeSamples;
+                    float[] softIn = new float[frameLen];
+                    float[] softOut = new float[frameLen];
+                    for (int i = 0; i < frameLen; i++)
+                    {
+                        softIn[i] = 0.25f * MathF.Sin(2f * MathF.PI * 220f * i / 16000f);
+                    }
+                    voxCpu.ProcessFrame(softIn, softOut);
+                    voxCpu.SoftResetStreamingBuffers();
+                    Array.Clear(softOut);
+                    voxCpu.ProcessFrame(softIn, softOut);
+
+                    float softMax = 0f;
+                    for (int i = 0; i < frameLen; i++)
+                    {
+                        if (!float.IsFinite(softOut[i]))
+                        {
+                            throw new InvalidDataException($"Non-finite output after SoftResetStreamingBuffers at index {i}.");
+                        }
+                        softMax = MathF.Max(softMax, MathF.Abs(softOut[i]));
+                    }
+                    if (softMax <= 1e-6f)
+                    {
+                        throw new InvalidOperationException("SoftResetStreamingBuffers produced zero output on immediate resumed chunk.");
+                    }
+                    Log($"[PASS] VoxLock SoftResetStreamingBuffers verified (maxAbs={softMax:F4})");
+
+                    // Verify UnloadSessionKeepProfile + EnsureSessionLoaded roundtrip preserves profile and inference
+                    voxCpu.UnloadSessionKeepProfile();
+                    if (voxCpu.IsSessionLoaded || !voxCpu.HasEnrolledVoiceprint || voxCpu.CurrentVoiceprint is null)
+                    {
+                        throw new InvalidOperationException("UnloadSessionKeepProfile did not park session while retaining voiceprint profile.");
+                    }
+
+                    voxCpu.EnsureSessionLoaded();
+                    if (!voxCpu.IsSessionLoaded || !voxCpu.HasEnrolledVoiceprint)
+                    {
+                        throw new InvalidOperationException("EnsureSessionLoaded failed to restore session and voiceprint.");
+                    }
+
+                    Array.Clear(softOut);
+                    voxCpu.ProcessFrame(softIn, softOut);
+                    float reloadMax = 0f;
+                    for (int i = 0; i < frameLen; i++)
+                    {
+                        if (!float.IsFinite(softOut[i]))
+                        {
+                            throw new InvalidDataException($"Non-finite output after EnsureSessionLoaded at index {i}.");
+                        }
+                        reloadMax = MathF.Max(reloadMax, MathF.Abs(softOut[i]));
+                    }
+                    if (reloadMax <= 1e-6f)
+                    {
+                        throw new InvalidOperationException("EnsureSessionLoaded produced zero output.");
+                    }
+                    Log($"[PASS] VoxLock Idle Unload & Hot Reload verified (maxAbs={reloadMax:F4})");
+                }
+
+                // Verify SIMD PCM & Stereo Equivalence
+                VerifySimdPcmConverters();
+                Log("[PASS] SIMD WasapiPcmConverter equivalence verified (Float32 & PCM16 Mono/Stereo, 513 frames)");
+
+                // Verify Anti-Stutter RingBufferWaveProvider Micro-Underrun Immediate Recovery
+                AudioPipelineEngine.VerifyMicroUnderrunImmediateRecoveryForSelfTest();
+                Log("[PASS] RingBufferWaveProvider Micro-Underrun Immediate Recovery verified");
 
                 // Verify AudioRingBuffer Drop-Oldest watermark semantics
                 var ring = new AudioRingBuffer(16384);
@@ -378,6 +476,48 @@ public static class SelfTestRunner
                     throw new InvalidOperationException($"Expected Back to return to Pipeline with empty history, got {vm.ActiveTab}.");
                 }
 
+                // Verify Tray Hidden Zero-UI-Dispatch telemetry gating & restore hydration
+                vm.SetWindowActiveForTelemetry(false);
+                var runningSnapshot = new TelemetrySnapshot(
+                    TimestampUtc: DateTimeOffset.UtcNow,
+                    State: PipelineRunState.Running,
+                    StatusText: "Running (Speech Active)",
+                    LatencyMs: 42.0,
+                    FrameInferenceMs: 5.5,
+                    VadInferenceMs: 0.3,
+                    GtcrnInferenceMs: 1.0,
+                    VoxLockInferenceMs: 4.2,
+                    ActiveCoreDescription: "Auto E-Cores",
+                    ActiveCoreMask: 0xFF,
+                    VadSpeechActive: true,
+                    VadProbability: 0.92f,
+                    InputRms: 0.15f,
+                    OutputRms: 0.14f,
+                    InputPeak: 0.3f,
+                    OutputPeak: 0.28f,
+                    BufferOverruns: 0,
+                    BufferUnderruns: 0,
+                    ActiveBackendDescription: "CPU");
+                for (int i = 0; i < 5; i++)
+                {
+                    vm.SimulateTelemetryForSelfTest(runningSnapshot with { LatencyMs = 42.0 + i });
+                }
+                await Dispatcher.Yield(DispatcherPriority.DataBind);
+                if (vm.StatusKind != PipelineStatusKind.Running || !string.Equals(vm.TelemetryLatencyText, "--", StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException($"Expected hidden tray telemetry to keep badge synced while skipping metric updates (Status={vm.StatusKind}, Latency='{vm.TelemetryLatencyText}').");
+                }
+
+                vm.SetWindowActiveForTelemetry(true);
+                await Dispatcher.Yield(DispatcherPriority.DataBind);
+                if (!string.Equals(vm.TelemetryLatencyText, "~46 ms", StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException($"Expected restored window telemetry to hydrate '~46 ms', got '{vm.TelemetryLatencyText}'.");
+                }
+                vm.SimulateTelemetryForSelfTest(TelemetrySnapshot.Idle);
+                await Dispatcher.Yield(DispatcherPriority.DataBind);
+                Log("[PASS] Tray Hidden Zero-UI-Dispatch & Restore Hydration verified");
+
                 var window = new MainWindow
                 {
                     DataContext = vm,
@@ -436,7 +576,7 @@ public static class SelfTestRunner
             {
                 if (affinity is not null && affinityMask != 0)
                 {
-                    affinity.BindCurrentThread(affinityMask, ThreadPriority.AboveNormal, affinityGroup);
+                    affinity.BindCurrentThread(affinityMask, ThreadPriority.Highest, affinityGroup);
                 }
 
                 vad.ResetState();
@@ -561,6 +701,116 @@ public static class SelfTestRunner
         }
 
         log(summaryLine);
+    }
+
+    private static void VerifySimdPcmConverters()
+    {
+        const int frames = 513;
+
+        // 1. Float32 Stereo -> Mono & Mono -> Stereo
+        float[] stereoIn = new float[frames * 2];
+        float[] expectedMono = new float[frames];
+        for (int f = 0; f < frames; f++)
+        {
+            float l = MathF.Sin(2f * MathF.PI * 220f * f / 16000f) * 0.6f;
+            float r = MathF.Cos(2f * MathF.PI * 440f * f / 16000f) * 0.4f;
+            stereoIn[f * 2] = l;
+            stereoIn[f * 2 + 1] = r;
+            expectedMono[f] = (l + r) * 0.5f;
+        }
+
+        float[] actualMono = new float[frames];
+        int readF32 = WasapiPcmConverter.ReadMonoFloats(
+            MemoryMarshal.AsBytes(stereoIn.AsSpan()),
+            WaveFormat.CreateIeeeFloatWaveFormat(48000, 2),
+            actualMono);
+        if (readF32 != frames)
+        {
+            throw new InvalidOperationException($"Float32 stereo read count mismatch: {readF32} != {frames}.");
+        }
+        for (int f = 0; f < frames; f++)
+        {
+            if (MathF.Abs(actualMono[f] - expectedMono[f]) >= 1e-4f)
+            {
+                throw new InvalidDataException($"Float32 stereo->mono mismatch at frame {f}: {actualMono[f]} != {expectedMono[f]}.");
+            }
+        }
+
+        byte[] stereoOutBytes = new byte[frames * 2 * sizeof(float)];
+        WasapiPcmConverter.WriteMonoFloats(expectedMono, WaveFormat.CreateIeeeFloatWaveFormat(48000, 2), stereoOutBytes);
+        ReadOnlySpan<float> stereoOut = MemoryMarshal.Cast<byte, float>(stereoOutBytes);
+        for (int f = 0; f < frames; f++)
+        {
+            float clamped = Math.Clamp(expectedMono[f], -1f, 1f);
+            if (MathF.Abs(stereoOut[f * 2] - clamped) >= 1e-4f || MathF.Abs(stereoOut[f * 2 + 1] - clamped) >= 1e-4f)
+            {
+                throw new InvalidDataException($"Float32 mono->stereo mismatch at frame {f}.");
+            }
+        }
+
+        // 2. Float32 Mono -> Mono (with clamp)
+        float[] monoWithClip = new float[frames];
+        monoWithClip[0] = 1.5f;
+        monoWithClip[frames - 1] = -1.5f;
+        for (int f = 1; f < frames - 1; f++)
+        {
+            monoWithClip[f] = expectedMono[f];
+        }
+        byte[] monoOutBytes = new byte[frames * sizeof(float)];
+        WasapiPcmConverter.WriteMonoFloats(monoWithClip, WaveFormat.CreateIeeeFloatWaveFormat(48000, 1), monoOutBytes);
+        ReadOnlySpan<float> monoOut = MemoryMarshal.Cast<byte, float>(monoOutBytes);
+        if (MathF.Abs(monoOut[0] - 1f) >= 1e-4f || MathF.Abs(monoOut[frames - 1] + 1f) >= 1e-4f)
+        {
+            throw new InvalidDataException("Float32 mono clamp mismatch.");
+        }
+
+        // 3. PCM16 Mono & Stereo -> Mono
+        short[] pcm16Mono = new short[frames];
+        short[] pcm16Stereo = new short[frames * 2];
+        for (int f = 0; f < frames; f++)
+        {
+            short l = (short)((f * 131 - 16000) % 30000);
+            short r = (short)((f * 97 + 5000) % 30000);
+            pcm16Mono[f] = l;
+            pcm16Stereo[f * 2] = l;
+            pcm16Stereo[f * 2 + 1] = r;
+        }
+
+        float[] actualPcm16Mono = new float[frames];
+        int read16Mono = WasapiPcmConverter.ReadMonoFloats(
+            MemoryMarshal.AsBytes(pcm16Mono.AsSpan()),
+            new WaveFormat(48000, 16, 1),
+            actualPcm16Mono);
+        if (read16Mono != frames)
+        {
+            throw new InvalidOperationException($"PCM16 mono read count mismatch: {read16Mono} != {frames}.");
+        }
+        for (int f = 0; f < frames; f++)
+        {
+            float exp = pcm16Mono[f] / 32768f;
+            if (MathF.Abs(actualPcm16Mono[f] - exp) >= 1e-4f)
+            {
+                throw new InvalidDataException($"PCM16 mono mismatch at frame {f}.");
+            }
+        }
+
+        float[] actualPcm16Stereo = new float[frames];
+        int read16Stereo = WasapiPcmConverter.ReadMonoFloats(
+            MemoryMarshal.AsBytes(pcm16Stereo.AsSpan()),
+            new WaveFormat(48000, 16, 2),
+            actualPcm16Stereo);
+        if (read16Stereo != frames)
+        {
+            throw new InvalidOperationException($"PCM16 stereo read count mismatch: {read16Stereo} != {frames}.");
+        }
+        for (int f = 0; f < frames; f++)
+        {
+            float exp = (pcm16Stereo[f * 2] / 32768f + pcm16Stereo[f * 2 + 1] / 32768f) * 0.5f;
+            if (MathF.Abs(actualPcm16Stereo[f] - exp) >= 1e-4f)
+            {
+                throw new InvalidDataException($"PCM16 stereo mismatch at frame {f}: {actualPcm16Stereo[f]} != {exp}.");
+            }
+        }
     }
 
     private static void CreateSyntheticVoiceWav(string path, int sampleRate, double durationSeconds)

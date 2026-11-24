@@ -95,7 +95,7 @@ public static class OnnxSessionFactory
 
     /// <summary>
     /// Creates an <see cref="OnnxSessionResult"/> for <paramref name="modelFilenameOrPath"/> using
-    /// <c>IntraOpNumThreads = 1</c>, <c>InterOpNumThreads = 1</c>, and <c>ORT_ENABLE_ALL</c>.
+    /// <c>IntraOpNumThreads</c>, <c>InterOpNumThreads = 1</c>, and <c>ORT_ENABLE_ALL</c>.
     /// Attempts CUDA when requested and falls back cleanly to CPU on any provider/library load error.
     /// </summary>
     public static OnnxSessionResult CreateSession(
@@ -103,7 +103,8 @@ public static class OnnxSessionFactory
         string modelFilenameOrPath,
         string? modelsRootDirectory,
         ComputeBackend requestedBackend,
-        int intraOpNumThreads = 1)
+        int intraOpNumThreads = 1,
+        bool allowSpinning = false)
     {
         int safeThreads = Math.Clamp(intraOpNumThreads, 1, 8);
         ModelEntry entry = ResolveModelEntry(manifest, modelFilenameOrPath);
@@ -125,13 +126,14 @@ public static class OnnxSessionFactory
             try
             {
                 EnsureCudaDllSearchPath();
-                using SessionOptions cudaOptions = CreateBaseSessionOptions(safeThreads);
+                using SessionOptions cudaOptions = CreateBaseSessionOptions(safeThreads, allowSpinning: false);
                 using var cudaProviderOptions = new OrtCUDAProviderOptions();
                 cudaProviderOptions.UpdateOptions(new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["device_id"] = "0",
                     ["cudnn_conv_algo_search"] = "HEURISTIC",
-                    ["do_copy_in_default_stream"] = "1"
+                    ["do_copy_in_default_stream"] = "1",
+                    ["arena_extend_strategy"] = "kSameAsRequested"
                 });
                 cudaOptions.AppendExecutionProvider_CUDA(cudaProviderOptions);
 
@@ -150,7 +152,7 @@ public static class OnnxSessionFactory
                 cudaFallbackReason = $"CUDA EP init failed for '{entry.Filename}' ({ex.Message}); fell back to CPU.";
             }
 
-            using SessionOptions fallbackCpuOptions = CreateBaseSessionOptions(safeThreads);
+            using SessionOptions fallbackCpuOptions = CreateBaseSessionOptions(safeThreads, allowSpinning);
             var fallbackSession = new InferenceSession(fullPath, fallbackCpuOptions);
             return new OnnxSessionResult(
                 session: fallbackSession,
@@ -162,7 +164,7 @@ public static class OnnxSessionFactory
                 fallbackMessage: cudaFallbackReason);
         }
 
-        using SessionOptions cpuOptions = CreateBaseSessionOptions(safeThreads);
+        using SessionOptions cpuOptions = CreateBaseSessionOptions(safeThreads, allowSpinning);
         var cpuSession = new InferenceSession(fullPath, cpuOptions);
         return new OnnxSessionResult(
             session: cpuSession,
@@ -232,7 +234,7 @@ public static class OnnxSessionFactory
         return checked((int)total);
     }
 
-    private static SessionOptions CreateBaseSessionOptions(int intraOpNumThreads)
+    private static SessionOptions CreateBaseSessionOptions(int intraOpNumThreads, bool allowSpinning)
     {
         var opts = new SessionOptions
         {
@@ -245,7 +247,8 @@ public static class OnnxSessionFactory
             LogSeverityLevel = OrtLoggingLevel.ORT_LOGGING_LEVEL_ERROR
         };
         opts.AddSessionConfigEntry("session.set_denormal_as_zero", "1");
-        if (intraOpNumThreads <= 1)
+        opts.AddSessionConfigEntry("session.inter_op.allow_spinning", "0");
+        if (!allowSpinning || intraOpNumThreads <= 1)
         {
             opts.AddSessionConfigEntry("session.intra_op.allow_spinning", "0");
         }

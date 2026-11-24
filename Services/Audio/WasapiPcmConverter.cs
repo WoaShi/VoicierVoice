@@ -3,6 +3,8 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.Arm;
+using System.Runtime.Intrinsics.X86;
 using NAudio.Wave;
 
 namespace VoiceLockStudio.Services.Audio;
@@ -47,6 +49,53 @@ internal static class WasapiPcmConverter
                 return frameCount;
             }
 
+            if (channels == 2)
+            {
+                int f = 0;
+                if (Vector128.IsHardwareAccelerated && frameCount >= 4)
+                {
+                    ref float srcRef = ref MemoryMarshal.GetReference(floatSrc);
+                    ref float dstRef = ref MemoryMarshal.GetReference(destinationMono);
+                    Vector128<float> half = Vector128.Create(0.5f);
+                    int limit = frameCount - 4;
+
+                    for (; f <= limit; f += 4)
+                    {
+                        nuint srcOff = (nuint)(f * 2);
+                        Vector128<float> v0 = Vector128.LoadUnsafe(ref srcRef, srcOff);
+                        Vector128<float> v1 = Vector128.LoadUnsafe(ref srcRef, srcOff + 4);
+
+                        Vector128<float> left;
+                        Vector128<float> right;
+                        if (Sse.IsSupported)
+                        {
+                            left = Sse.Shuffle(v0, v1, 0x88);
+                            right = Sse.Shuffle(v0, v1, 0xDD);
+                        }
+                        else if (AdvSimd.Arm64.IsSupported)
+                        {
+                            left = AdvSimd.Arm64.UnzipEven(v0, v1);
+                            right = AdvSimd.Arm64.UnzipOdd(v0, v1);
+                        }
+                        else
+                        {
+                            left = Vector128.Create(v0[0], v0[2], v1[0], v1[2]);
+                            right = Vector128.Create(v0[1], v0[3], v1[1], v1[3]);
+                        }
+
+                        ((left + right) * half).StoreUnsafe(ref dstRef, (nuint)f);
+                    }
+                }
+
+                for (; f < frameCount; f++)
+                {
+                    int baseIdx = f * 2;
+                    destinationMono[f] = (floatSrc[baseIdx] + floatSrc[baseIdx + 1]) * 0.5f;
+                }
+
+                return frameCount;
+            }
+
             for (int f = 0; f < frameCount; f++)
             {
                 int baseIdx = f * channels;
@@ -61,9 +110,89 @@ internal static class WasapiPcmConverter
             return frameCount;
         }
 
-        if (format.BitsPerSample == 16)
+        if (!isFloat && format.BitsPerSample == 16)
         {
             const float scale16 = 1f / 32768f;
+            if (channels == 1 && blockAlign == 2 && BitConverter.IsLittleEndian)
+            {
+                int f = 0;
+                if (Vector128.IsHardwareAccelerated && frameCount >= 8)
+                {
+                    ReadOnlySpan<short> shortSrc = MemoryMarshal.Cast<byte, short>(sourceBytes);
+                    ref short srcRef = ref MemoryMarshal.GetReference(shortSrc);
+                    ref float dstRef = ref MemoryMarshal.GetReference(destinationMono);
+                    Vector128<float> vScale = Vector128.Create(scale16);
+                    int limit = frameCount - 8;
+
+                    for (; f <= limit; f += 8)
+                    {
+                        Vector128<short> vShort = Vector128.LoadUnsafe(ref srcRef, (nuint)f);
+                        (Vector128<int> lo, Vector128<int> hi) = Vector128.Widen(vShort);
+                        (Vector128.ConvertToSingle(lo) * vScale).StoreUnsafe(ref dstRef, (nuint)f);
+                        (Vector128.ConvertToSingle(hi) * vScale).StoreUnsafe(ref dstRef, (nuint)(f + 4));
+                    }
+                }
+
+                for (; f < frameCount; f++)
+                {
+                    short s = BinaryPrimitives.ReadInt16LittleEndian(sourceBytes.Slice(f * 2, 2));
+                    destinationMono[f] = s * scale16;
+                }
+
+                return frameCount;
+            }
+
+            if (channels == 2 && blockAlign == 4 && BitConverter.IsLittleEndian)
+            {
+                int f = 0;
+                if (Vector128.IsHardwareAccelerated && frameCount >= 4)
+                {
+                    ReadOnlySpan<short> shortSrc = MemoryMarshal.Cast<byte, short>(sourceBytes);
+                    ref short srcRef = ref MemoryMarshal.GetReference(shortSrc);
+                    ref float dstRef = ref MemoryMarshal.GetReference(destinationMono);
+                    Vector128<float> vHalfScale = Vector128.Create(0.5f * scale16);
+                    int limit = frameCount - 4;
+
+                    for (; f <= limit; f += 4)
+                    {
+                        Vector128<short> vShort = Vector128.LoadUnsafe(ref srcRef, (nuint)(f * 2));
+                        (Vector128<int> lo, Vector128<int> hi) = Vector128.Widen(vShort);
+                        Vector128<float> v0 = Vector128.ConvertToSingle(lo);
+                        Vector128<float> v1 = Vector128.ConvertToSingle(hi);
+
+                        Vector128<float> left;
+                        Vector128<float> right;
+                        if (Sse.IsSupported)
+                        {
+                            left = Sse.Shuffle(v0, v1, 0x88);
+                            right = Sse.Shuffle(v0, v1, 0xDD);
+                        }
+                        else if (AdvSimd.Arm64.IsSupported)
+                        {
+                            left = AdvSimd.Arm64.UnzipEven(v0, v1);
+                            right = AdvSimd.Arm64.UnzipOdd(v0, v1);
+                        }
+                        else
+                        {
+                            left = Vector128.Create(v0[0], v0[2], v1[0], v1[2]);
+                            right = Vector128.Create(v0[1], v0[3], v1[1], v1[3]);
+                        }
+
+                        ((left + right) * vHalfScale).StoreUnsafe(ref dstRef, (nuint)f);
+                    }
+                }
+
+                for (; f < frameCount; f++)
+                {
+                    int frameOffset = f * 4;
+                    short s0 = BinaryPrimitives.ReadInt16LittleEndian(sourceBytes.Slice(frameOffset, 2));
+                    short s1 = BinaryPrimitives.ReadInt16LittleEndian(sourceBytes.Slice(frameOffset + 2, 2));
+                    destinationMono[f] = (s0 + s1) * (0.5f * scale16);
+                }
+
+                return frameCount;
+            }
+
             for (int f = 0; f < frameCount; f++)
             {
                 int frameOffset = f * blockAlign;
@@ -130,6 +259,84 @@ internal static class WasapiPcmConverter
         if (isFloat && targetFormat.BitsPerSample == 32)
         {
             Span<float> dstFloat = MemoryMarshal.Cast<byte, float>(destinationBytes);
+            if (channels == 1)
+            {
+                int f = 0;
+                if (Vector<float>.IsSupported && frameCount >= Vector<float>.Count)
+                {
+                    ref float srcRef = ref MemoryMarshal.GetReference(sourceMono);
+                    ref float dstRef = ref MemoryMarshal.GetReference(dstFloat);
+                    int vecCount = Vector<float>.Count;
+                    int limit = frameCount - vecCount;
+                    var vNegOne = new Vector<float>(-1f);
+                    var vPosOne = new Vector<float>(1f);
+
+                    for (; f <= limit; f += vecCount)
+                    {
+                        nuint off = (nuint)f;
+                        Vector<float> v = Vector.LoadUnsafe(ref srcRef, off);
+                        Vector<float> clamped = Vector.Max(vNegOne, Vector.Min(vPosOne, v));
+                        clamped.StoreUnsafe(ref dstRef, off);
+                    }
+                }
+
+                for (; f < frameCount; f++)
+                {
+                    dstFloat[f] = Math.Clamp(sourceMono[f], -1f, 1f);
+                }
+                return;
+            }
+
+            if (channels == 2)
+            {
+                int f = 0;
+                if (Vector128.IsHardwareAccelerated && frameCount >= 4)
+                {
+                    ref float srcRef = ref MemoryMarshal.GetReference(sourceMono);
+                    ref float dstRef = ref MemoryMarshal.GetReference(dstFloat);
+                    Vector128<float> vNegOne = Vector128.Create(-1f);
+                    Vector128<float> vPosOne = Vector128.Create(1f);
+                    int limit = frameCount - 4;
+
+                    for (; f <= limit; f += 4)
+                    {
+                        Vector128<float> v = Vector128.LoadUnsafe(ref srcRef, (nuint)f);
+                        Vector128<float> clamped = Vector128.Max(vNegOne, Vector128.Min(vPosOne, v));
+
+                        Vector128<float> lo;
+                        Vector128<float> hi;
+                        if (Sse.IsSupported)
+                        {
+                            lo = Sse.UnpackLow(clamped, clamped);
+                            hi = Sse.UnpackHigh(clamped, clamped);
+                        }
+                        else if (AdvSimd.Arm64.IsSupported)
+                        {
+                            lo = AdvSimd.Arm64.ZipLow(clamped, clamped);
+                            hi = AdvSimd.Arm64.ZipHigh(clamped, clamped);
+                        }
+                        else
+                        {
+                            lo = Vector128.Create(clamped[0], clamped[0], clamped[1], clamped[1]);
+                            hi = Vector128.Create(clamped[2], clamped[2], clamped[3], clamped[3]);
+                        }
+
+                        nuint dstOff = (nuint)(f * 2);
+                        lo.StoreUnsafe(ref dstRef, dstOff);
+                        hi.StoreUnsafe(ref dstRef, dstOff + 4);
+                    }
+                }
+
+                for (; f < frameCount; f++)
+                {
+                    float sample = Math.Clamp(sourceMono[f], -1f, 1f);
+                    int baseIdx = f * 2;
+                    dstFloat[baseIdx] = sample;
+                    dstFloat[baseIdx + 1] = sample;
+                }
+                return;
+            }
+
             for (int f = 0; f < frameCount; f++)
             {
                 float sample = Math.Clamp(sourceMono[f], -1f, 1f);

@@ -17,12 +17,13 @@ public sealed class AudioPipelineEngine : IDisposable
     public const int DspSampleRate = 16000;
     public const int HopSizeSamples = 256;          // 16 ms @ 16 kHz
     public const int VadFrameSizeSamples = 512;     // 32 ms @ 16 kHz (2 hops)
-    private const int CaptureBufferMs = 20;
-    private const int StandardRenderLatencyMs = 45;
-    private const int StandardOutputPrebufferMs = 54;
-    private const int StandardOutputMaxBacklogMs = 128;
+    private const int EventSyncCaptureBufferMs = 120;
+    private const int PollingCaptureBufferMs = 30;
+    private const int StandardRenderLatencyMs = 32;
+    private const int StandardOutputPrebufferMs = 38;
+    private const int StandardOutputMaxBacklogMs = 112;
     private const int LowLatencyRenderLatencyMs = 24;
-    private const int LowLatencyOutputPrebufferMs = 28;
+    private const int LowLatencyOutputPrebufferMs = 26;
     private const int LowLatencyOutputMaxBacklogMs = 96;
     private const int VadHangoverFrames = 10;       // 10 * 32 ms = 320 ms
     private const int SilenceResetThresholdFrames = 5;
@@ -64,6 +65,10 @@ public sealed class AudioPipelineEngine : IDisposable
     private int _silentOutputHops;
     private int _primarySilenceFrac;
     private int _monitorSilenceFrac;
+    private float _lastEmittedSample16k;
+    private int _crossfade16kSamplesRemaining;
+    private int _crossfade16kTotalSamples = 64;
+    private volatile int _adaptiveExtraCushionMs;
 
     private readonly AutoResetEvent _dspWorkSignal = new(false);
     private readonly ManualResetEventSlim _dspWarmupReady = new(false);
@@ -85,6 +90,8 @@ public sealed class AudioPipelineEngine : IDisposable
     private WasapiCapture? _capture;
     private WasapiOut? _primaryOut;
     private WasapiOut? _monitorOut;
+    private RingBufferWaveProvider? _primaryWaveProvider;
+    private RingBufferWaveProvider? _monitorWaveProvider;
     private MMDevice? _captureDevice;
     private MMDevice? _primaryRenderDevice;
     private MMDevice? _monitorRenderDevice;
@@ -105,6 +112,7 @@ public sealed class AudioPipelineEngine : IDisposable
     private TelemetrySnapshot _latestTelemetry = TelemetrySnapshot.Idle;
     private string _activeCoreDescription = "Unbound";
     private long _activeCoreMask;
+    private int _activeProcessorGroup;
 
     public AudioPipelineEngine(
         AudioDeviceService? deviceService = null,
@@ -163,6 +171,11 @@ public sealed class AudioPipelineEngine : IDisposable
 
         UpdateCpuAffinity(settings.AutoAffinityEnabled, settings.SelectedCoreMask, settings.SelectedProcessorGroup);
         SetMonitorLoopback(settings.MonitorLoopbackEnabled);
+
+        int prebufferMs = GetOutputPrebufferMs();
+        int maxBacklogMs = GetOutputMaxBacklogMs();
+        _primaryWaveProvider?.SetBaseCushionMs(prebufferMs, maxBacklogMs);
+        _monitorWaveProvider?.SetBaseCushionMs(prebufferMs, maxBacklogMs);
     }
 
     public void UpdateCpuAffinity(bool autoAffinityEnabled, ulong selectedCoreMask, ushort processorGroup = 0)
@@ -255,6 +268,10 @@ public sealed class AudioPipelineEngine : IDisposable
                 _silentOutputHops = 0;
                 _primarySilenceFrac = 0;
                 _monitorSilenceFrac = 0;
+                _lastEmittedSample16k = 0f;
+                _crossfade16kSamplesRemaining = 0;
+                _crossfade16kTotalSamples = 64;
+                _adaptiveExtraCushionMs = 0;
                 Interlocked.Exchange(ref _bufferOverruns, 0);
                 Interlocked.Exchange(ref _bufferUnderruns, 0);
 
@@ -271,11 +288,11 @@ public sealed class AudioPipelineEngine : IDisposable
 
                 try
                 {
-                    _capture = new WasapiCapture(_captureDevice, useEventSync: true, audioBufferMillisecondsLength: CaptureBufferMs);
+                    _capture = new WasapiCapture(_captureDevice, useEventSync: true, audioBufferMillisecondsLength: EventSyncCaptureBufferMs);
                 }
                 catch
                 {
-                    _capture = new WasapiCapture(_captureDevice, useEventSync: false, audioBufferMillisecondsLength: CaptureBufferMs);
+                    _capture = new WasapiCapture(_captureDevice, useEventSync: false, audioBufferMillisecondsLength: PollingCaptureBufferMs);
                 }
 
                 int renderLatencyMs = GetRenderLatencyMs();
@@ -288,6 +305,7 @@ public sealed class AudioPipelineEngine : IDisposable
                     renderLatencyMs,
                     prebufferMs,
                     maxBacklogMs,
+                    out _primaryWaveProvider,
                     out bool primaryUsedEventSync);
 
                 _primaryRenderRate = _primaryOut.OutputWaveFormat.SampleRate;
@@ -322,6 +340,7 @@ public sealed class AudioPipelineEngine : IDisposable
 
                 PlayWasapiOutWithFallback(
                     ref _primaryOut,
+                    ref _primaryWaveProvider,
                     primaryUsedEventSync,
                     _primaryRenderDevice,
                     _primaryOutRing,
@@ -344,7 +363,7 @@ public sealed class AudioPipelineEngine : IDisposable
                     _capture.RecordingStopped -= OnCaptureStopped;
                     _capture.Dispose();
 
-                    _capture = new WasapiCapture(_captureDevice, useEventSync: false, audioBufferMillisecondsLength: CaptureBufferMs);
+                    _capture = new WasapiCapture(_captureDevice, useEventSync: false, audioBufferMillisecondsLength: PollingCaptureBufferMs);
                     _inputResampler.Configure(_capture.WaveFormat.SampleRate, DspSampleRate);
                     _capture.DataAvailable += OnCaptureDataAvailable;
                     _capture.RecordingStopped += OnCaptureStopped;
@@ -419,6 +438,7 @@ public sealed class AudioPipelineEngine : IDisposable
         _capture = null;
         _primaryOut?.Dispose();
         _primaryOut = null;
+        _primaryWaveProvider = null;
 
         _captureDevice?.Dispose();
         _captureDevice = null;
@@ -456,11 +476,14 @@ public sealed class AudioPipelineEngine : IDisposable
                 renderLatencyMs,
                 prebufferMs,
                 maxBacklogMs,
+                out _monitorWaveProvider,
                 out bool monitorUsedEventSync);
+            _monitorWaveProvider?.SetAdaptiveCushionMs(_adaptiveExtraCushionMs);
             _monitorRenderRate = _monitorOut.OutputWaveFormat.SampleRate;
             _monitorOutResampler.Configure(DspSampleRate, _monitorRenderRate);
             PlayWasapiOutWithFallback(
                 ref _monitorOut,
+                ref _monitorWaveProvider,
                 monitorUsedEventSync,
                 _monitorRenderDevice,
                 _monitorOutRing,
@@ -493,6 +516,7 @@ public sealed class AudioPipelineEngine : IDisposable
 
         _monitorOut?.Dispose();
         _monitorOut = null;
+        _monitorWaveProvider = null;
         _monitorRenderDevice?.Dispose();
         _monitorRenderDevice = null;
         _monitorOutRing.Reset();
@@ -604,6 +628,16 @@ public sealed class AudioPipelineEngine : IDisposable
         float lastOutputRms = 0f;
         float lastOutputPeak = 0f;
 
+        long lastObservedUnderruns = 0;
+        int adaptiveExtraMs = 0;
+        int stableCushionHops = 0;
+        double hopAccumComputeMs = 0.0;
+        int consecutiveHighLoadChunks = 0;
+        bool escapedCoreCage = false;
+        int lowLoadRecoveryHops = 0;
+        int consecutiveOverbudgetChunks = 0;
+        int overloadBypassHopsRemaining = 0;
+
         try
         {
             while (!token.IsCancellationRequested && _isRunning)
@@ -611,6 +645,9 @@ public sealed class AudioPipelineEngine : IDisposable
                 if (_affinityUpdatePending)
                 {
                     _affinityUpdatePending = false;
+                    escapedCoreCage = false;
+                    consecutiveHighLoadChunks = 0;
+                    lowLoadRecoveryHops = 0;
                     ApplyAffinityOnDspThread(mmcssScope);
                 }
 
@@ -622,12 +659,12 @@ public sealed class AudioPipelineEngine : IDisposable
 
                 while (_inputRing16k.AvailableRead >= HopSizeSamples && !token.IsCancellationRequested && _isRunning)
                 {
-                    // Max-latency watermark ("Drop Oldest"): absorb 25 ms polling jitter without false drops.
-                    bool voxConfigured = _voxLockEnabled && _voxLockBackend is { IsInitialized: true, HasEnrolledVoiceprint: true };
+                    // Max-latency watermark ("Drop Oldest"): preserve BSRNN recurrent memory with soft buffer reset.
+                    bool voxConfigured = _voxLockEnabled && _voxLockBackend is { IsInitialized: true, IsSessionLoaded: true, HasEnrolledVoiceprint: true };
                     int voxFrameSizeCheck = voxConfigured
                         ? Math.Clamp(_voxLockBackend!.FrameSizeSamples, HopSizeSamples, _voxOutScratch.Length)
                         : HopSizeSamples;
-                    int maxInputBacklog = voxConfigured ? Math.Max(1536, voxFrameSizeCheck * 3) : 1024;
+                    int maxInputBacklog = voxConfigured ? Math.Max(3200, voxFrameSizeCheck * 4) : 2048;
                     int keepInputSamples = voxConfigured ? Math.Max(HopSizeSamples * 2, voxFrameSizeCheck) : HopSizeSamples * 2;
                     int availIn = _inputRing16k.AvailableRead;
                     if (availIn > maxInputBacklog)
@@ -639,7 +676,9 @@ public sealed class AudioPipelineEngine : IDisposable
                             vadAccumOffset = 0;
                             voxStagingCount = 0;
                             hasHeldSilenceHop = false;
-                            _voxLockBackend?.ResetState();
+                            hopAccumComputeMs = 0.0;
+                            _voxLockBackend?.SoftResetStreamingBuffers();
+                            Request16kCrossfade(32);
                         }
                     }
 
@@ -713,15 +752,36 @@ public sealed class AudioPipelineEngine : IDisposable
                         lastVadProb = 1f;
                     }
 
-                    bool voxActive = _voxLockEnabled && _voxLockBackend is { IsInitialized: true, HasEnrolledVoiceprint: true };
+                    bool voxActive = _voxLockEnabled && _voxLockBackend is { IsInitialized: true, IsSessionLoaded: true, HasEnrolledVoiceprint: true };
                     int voxFrameSize = voxActive
                         ? Math.Clamp(_voxLockBackend!.FrameSizeSamples, HopSizeSamples, _voxOutScratch.Length)
                         : HopSizeSamples;
+                    if (!voxActive)
+                    {
+                        overloadBypassHopsRemaining = 0;
+                        consecutiveOverbudgetChunks = 0;
+                        consecutiveHighLoadChunks = 0;
+                    }
+
+                    bool overloadBypassActive = voxActive && overloadBypassHopsRemaining > 0;
+                    bool effectiveVoxActive = voxActive && !overloadBypassActive;
                     bool voxRanThisHop = false;
 
                     // Downstream cascade: Silero Gate -> GTCRN (256 hop) -> VoxLock (16 ms or 32 ms chunk)
                     if (vadEnabled && !vadSpeechActive)
                     {
+                        overloadBypassHopsRemaining = 0;
+                        consecutiveOverbudgetChunks = 0;
+                        consecutiveHighLoadChunks = 0;
+                        hopAccumComputeMs = 0.0;
+
+                        if (escapedCoreCage && consecutiveSilenceFrames >= SilenceResetThresholdFrames)
+                        {
+                            escapedCoreCage = false;
+                            lowLoadRecoveryHops = 0;
+                            ApplyAffinityOnDspThread(mmcssScope);
+                        }
+
                         if (voxStagingCount > 0)
                         {
                             // Drain any odd staged K=4 hop as silence so input/output sample counts remain 1:1.
@@ -755,28 +815,42 @@ public sealed class AudioPipelineEngine : IDisposable
                     }
                     else
                     {
-                        // Flush any held silence hop through the speech cascade as a 16 ms attack pre-roll without duplicating samples.
+                        // Flush any held silence hop cleanly without triggering a double-VoxLock compute spike on speech onset.
                         if (hasHeldSilenceHop)
                         {
                             hasHeldSilenceHop = false;
-                            ProcessSpeechHop(
-                                _vadAccum512.AsSpan(0, HopSizeSamples),
-                                ticksToMs,
-                                voxActive,
-                                voxFrameSize,
-                                ref voxStagingCount,
-                                ref downstreamStateClean,
-                                ref gtcrnInfMs,
-                                ref voxLockInfMs,
-                                ref voxRanThisHop,
-                                ref lastOutputRms,
-                                ref lastOutputPeak);
+                            if (effectiveVoxActive && (voxFrameSize <= HopSizeSamples || smoothedTotalInfMs > 12.0))
+                            {
+                                ProcessGtcrnOnlyHop(
+                                    _vadAccum512.AsSpan(0, HopSizeSamples),
+                                    ticksToMs,
+                                    ref downstreamStateClean,
+                                    ref gtcrnInfMs,
+                                    ref lastOutputRms,
+                                    ref lastOutputPeak,
+                                    applyFadeInFromZero: true);
+                            }
+                            else
+                            {
+                                ProcessSpeechHop(
+                                    _vadAccum512.AsSpan(0, HopSizeSamples),
+                                    ticksToMs,
+                                    effectiveVoxActive,
+                                    voxFrameSize,
+                                    ref voxStagingCount,
+                                    ref downstreamStateClean,
+                                    ref gtcrnInfMs,
+                                    ref voxLockInfMs,
+                                    ref voxRanThisHop,
+                                    ref lastOutputRms,
+                                    ref lastOutputPeak);
+                            }
                         }
 
                         ProcessSpeechHop(
                             _hopInput256,
                             ticksToMs,
-                            voxActive,
+                            effectiveVoxActive,
                             voxFrameSize,
                             ref voxStagingCount,
                             ref downstreamStateClean,
@@ -788,7 +862,145 @@ public sealed class AudioPipelineEngine : IDisposable
                     }
 
                     double totalInfMs = (Stopwatch.GetTimestamp() - frameStartTick) * ticksToMs;
-                    if (!voxActive || voxRanThisHop || (vadEnabled && !vadSpeechActive))
+
+                    if (!vadEnabled || vadSpeechActive)
+                    {
+                        hopAccumComputeMs += totalInfMs;
+
+                        if (overloadBypassActive)
+                        {
+                            hopAccumComputeMs = 0.0;
+                            overloadBypassHopsRemaining--;
+                            if (overloadBypassHopsRemaining == 0)
+                            {
+                                Request16kCrossfade(64);
+                            }
+                        }
+                        else if (!effectiveVoxActive || voxRanThisHop || _inputRing16k.AvailableRead >= 1600)
+                        {
+                            bool ranFullUnit = !effectiveVoxActive || voxRanThisHop;
+                            double chunkWorkMs = hopAccumComputeMs;
+                            if (ranFullUnit)
+                            {
+                                hopAccumComputeMs = 0.0;
+                            }
+
+                            double chunkBudgetMs = effectiveVoxActive
+                                ? (voxFrameSize * 1000.0 / DspSampleRate)
+                                : (HopSizeSamples * 1000.0 / DspSampleRate);
+
+                            // Adaptive output jitter cushion (expands rapidly on underrun/high load, decays slowly when calm).
+                            long currentUnderruns = Interlocked.Read(ref _bufferUnderruns);
+                            if (currentUnderruns > lastObservedUnderruns || (ranFullUnit && chunkWorkMs > chunkBudgetMs * 0.80))
+                            {
+                                lastObservedUnderruns = currentUnderruns;
+                                adaptiveExtraMs = Math.Min(48, adaptiveExtraMs + 16);
+                                stableCushionHops = 0;
+                                UpdateAdaptiveOutputCushion(adaptiveExtraMs);
+                            }
+                            else if (adaptiveExtraMs > 0 && ranFullUnit)
+                            {
+                                stableCushionHops += effectiveVoxActive && voxFrameSize > HopSizeSamples ? 2 : 1;
+                                if (stableCushionHops >= 180)
+                                {
+                                    stableCushionHops = 0;
+                                    adaptiveExtraMs = Math.Max(0, adaptiveExtraMs - 4);
+                                    UpdateAdaptiveOutputCushion(adaptiveExtraMs);
+                                }
+                            }
+
+                            // Stage A: Dynamic Core Escape when E-Core / tail-core affinity is saturated by external system load.
+                            if (_autoAffinityEnabled && _activeComputeBackend == ComputeBackend.Cpu && effectiveVoxActive)
+                            {
+                                if (!escapedCoreCage)
+                                {
+                                    if ((ranFullUnit && chunkWorkMs > chunkBudgetMs * 0.88) || _inputRing16k.AvailableRead >= voxFrameSize * 2)
+                                    {
+                                        consecutiveHighLoadChunks++;
+                                        if (consecutiveHighLoadChunks >= 3)
+                                        {
+                                            consecutiveHighLoadChunks = 0;
+                                            ulong escMask = _affinityManager.GetOverloadEscapeMask(out ushort escGroup, out _);
+                                            if (escMask != 0 &&
+                                                (escMask != unchecked((ulong)Volatile.Read(ref _activeCoreMask)) ||
+                                                 escGroup != Volatile.Read(ref _activeProcessorGroup)))
+                                            {
+                                                ApplyExplicitAffinityOnDspThread(escMask, escGroup, mmcssScope);
+                                                escapedCoreCage = true;
+                                                lowLoadRecoveryHops = 0;
+                                            }
+                                        }
+                                    }
+                                    else if (ranFullUnit)
+                                    {
+                                        consecutiveHighLoadChunks = 0;
+                                    }
+                                }
+                                else if (ranFullUnit)
+                                {
+                                    if (chunkWorkMs < chunkBudgetMs * 0.42)
+                                    {
+                                        lowLoadRecoveryHops++;
+                                        if (lowLoadRecoveryHops >= 150)
+                                        {
+                                            escapedCoreCage = false;
+                                            lowLoadRecoveryHops = 0;
+                                            ApplyAffinityOnDspThread(mmcssScope);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        lowLoadRecoveryHops = 0;
+                                    }
+                                }
+                            }
+
+                            // Stage B: Graceful Overload Shedding (smooth VoxLock -> GTCRN fallback to guarantee zero dropouts).
+                            if (effectiveVoxActive)
+                            {
+                                bool queueBackedUp = _inputRing16k.AvailableRead >= 1600;
+                                if ((ranFullUnit && chunkWorkMs > chunkBudgetMs * 1.02) || queueBackedUp)
+                                {
+                                    consecutiveOverbudgetChunks++;
+                                    if (consecutiveOverbudgetChunks >= 3 || queueBackedUp)
+                                    {
+                                        consecutiveOverbudgetChunks = 0;
+                                        overloadBypassHopsRemaining = 64; // ~1.02 s graceful GTCRN cushion
+                                        hopAccumComputeMs = 0.0;
+
+                                        if (voxStagingCount > 0)
+                                        {
+                                            int stagedHops = voxStagingCount / HopSizeSamples;
+                                            for (int s = 0; s < stagedHops; s++)
+                                            {
+                                                Span<float> stagedSpan = _voxStagingIn.AsSpan(s * HopSizeSamples, HopSizeSamples);
+                                                if (s == 0)
+                                                {
+                                                    Request16kCrossfade(64);
+                                                }
+                                                Apply16kTransitionCrossfade(stagedSpan);
+                                                lastOutputRms = WasapiPcmConverter.ComputeRmsAndPeak(stagedSpan, out lastOutputPeak);
+                                                WriteOutputToRings(stagedSpan);
+                                            }
+                                            voxStagingCount = 0;
+                                        }
+                                        else
+                                        {
+                                            Request16kCrossfade(64);
+                                        }
+
+                                        _voxLockBackend?.SoftResetStreamingBuffers();
+                                    }
+                                }
+                                else if (ranFullUnit)
+                                {
+                                    consecutiveOverbudgetChunks = 0;
+                                }
+                            }
+                        }
+                    }
+
+                    if (!effectiveVoxActive || voxRanThisHop || (vadEnabled && !vadSpeechActive))
                     {
                         smoothedTotalInfMs = smoothedTotalInfMs == 0.0 ? totalInfMs : smoothedTotalInfMs * 0.8 + totalInfMs * 0.2;
                     }
@@ -797,7 +1009,7 @@ public sealed class AudioPipelineEngine : IDisposable
                         smoothedVadInfMs = smoothedVadInfMs == 0.0 ? vadInfMs : smoothedVadInfMs * 0.7 + vadInfMs * 0.3;
                     }
                     smoothedGtcrnInfMs = _gtcrnEnabled ? (smoothedGtcrnInfMs == 0.0 ? gtcrnInfMs : smoothedGtcrnInfMs * 0.8 + gtcrnInfMs * 0.2) : 0.0;
-                    if (voxActive)
+                    if (effectiveVoxActive)
                     {
                         if (voxRanThisHop)
                         {
@@ -813,7 +1025,7 @@ public sealed class AudioPipelineEngine : IDisposable
                     if ((nowTick - lastTelemetryTick) * ticksToMs >= TelemetryIntervalMs)
                     {
                         lastTelemetryTick = nowTick;
-                        double algorithmicLatencyMs = ComputeTotalLatencyMs();
+                        double algorithmicLatencyMs = ComputeTotalLatencyMs(effectiveVoxActive);
                         string coreDesc = Volatile.Read(ref _activeCoreDescription);
                         ulong coreMask = unchecked((ulong)Volatile.Read(ref _activeCoreMask));
 
@@ -878,21 +1090,47 @@ public sealed class AudioPipelineEngine : IDisposable
             }
         }
 
-        AffinityBindResult result = _affinityManager.BindCurrentThread(mask, ThreadPriority.AboveNormal, group);
+        ApplyExplicitAffinityOnDspThread(mask, group, mmcssScope);
+    }
+
+    private void ApplyExplicitAffinityOnDspThread(
+        ulong mask,
+        ushort group,
+        CpuAffinityManager.MmcssAudioScope? mmcssScope = null)
+    {
+        AffinityBindResult result = _affinityManager.BindCurrentThread(mask, ThreadPriority.Highest, group);
         mmcssScope?.ReinforcePriority();
-        _voxLockBackend?.UpdateCpuAffinity(result.AppliedMask, group);
+        _voxLockBackend?.UpdateCpuAffinity(result.AppliedMask, result.ProcessorGroup);
         Volatile.Write(ref _activeCoreDescription, result.Description);
         Volatile.Write(ref _activeCoreMask, unchecked((long)result.AppliedMask));
+        Volatile.Write(ref _activeProcessorGroup, result.ProcessorGroup);
+    }
+
+    private int GetEffectiveDownstreamFrameSamples()
+    {
+        if (_voxLockEnabled && _voxLockBackend is { IsInitialized: true })
+        {
+            return _voxLockBackend.FrameSizeSamples;
+        }
+
+        return HopSizeSamples;
     }
 
     private int GetRenderLatencyMs() =>
-        (_voxLockBackend?.FrameSizeSamples ?? 512) <= 256 ? LowLatencyRenderLatencyMs : StandardRenderLatencyMs;
+        GetEffectiveDownstreamFrameSamples() <= HopSizeSamples ? LowLatencyRenderLatencyMs : StandardRenderLatencyMs;
 
     private int GetOutputPrebufferMs() =>
-        (_voxLockBackend?.FrameSizeSamples ?? 512) <= 256 ? LowLatencyOutputPrebufferMs : StandardOutputPrebufferMs;
+        GetEffectiveDownstreamFrameSamples() <= HopSizeSamples ? LowLatencyOutputPrebufferMs : StandardOutputPrebufferMs;
 
     private int GetOutputMaxBacklogMs() =>
-        (_voxLockBackend?.FrameSizeSamples ?? 512) <= 256 ? LowLatencyOutputMaxBacklogMs : StandardOutputMaxBacklogMs;
+        GetEffectiveDownstreamFrameSamples() <= HopSizeSamples ? LowLatencyOutputMaxBacklogMs : StandardOutputMaxBacklogMs;
+
+    private void UpdateAdaptiveOutputCushion(int extraMs)
+    {
+        _adaptiveExtraCushionMs = extraMs;
+        _primaryWaveProvider?.SetAdaptiveCushionMs(extraMs);
+        _monitorWaveProvider?.SetAdaptiveCushionMs(extraMs);
+    }
 
     private static WasapiOut CreateAndInitWasapiOutWithFallback(
         MMDevice device,
@@ -901,6 +1139,7 @@ public sealed class AudioPipelineEngine : IDisposable
         int renderLatencyMs,
         int prebufferMs,
         int maxBacklogMs,
+        out RingBufferWaveProvider provider,
         out bool usedEventSync)
     {
         try
@@ -913,7 +1152,8 @@ public sealed class AudioPipelineEngine : IDisposable
                 renderLatencyMs,
                 prebufferMs,
                 maxBacklogMs,
-                useEventSync: true);
+                useEventSync: true,
+                out provider);
         }
         catch
         {
@@ -925,12 +1165,14 @@ public sealed class AudioPipelineEngine : IDisposable
                 renderLatencyMs,
                 prebufferMs,
                 maxBacklogMs,
-                useEventSync: false);
+                useEventSync: false,
+                out provider);
         }
     }
 
     private static void PlayWasapiOutWithFallback(
         ref WasapiOut? output,
+        ref RingBufferWaveProvider? waveProvider,
         bool usedEventSync,
         MMDevice device,
         AudioRingBuffer ring,
@@ -950,6 +1192,7 @@ public sealed class AudioPipelineEngine : IDisposable
         {
             output.Dispose();
             output = null;
+            waveProvider = null;
             WasapiOut fallback = CreateAndInitWasapiOutCore(
                 device,
                 ring,
@@ -957,8 +1200,10 @@ public sealed class AudioPipelineEngine : IDisposable
                 renderLatencyMs,
                 prebufferMs,
                 maxBacklogMs,
-                useEventSync: false);
+                useEventSync: false,
+                out RingBufferWaveProvider fallbackProvider);
             output = fallback;
+            waveProvider = fallbackProvider;
             onRenderRateResolved(fallback.OutputWaveFormat.SampleRate);
             fallback.Play();
         }
@@ -971,18 +1216,18 @@ public sealed class AudioPipelineEngine : IDisposable
         int renderLatencyMs,
         int prebufferMs,
         int maxBacklogMs,
-        bool useEventSync)
+        bool useEventSync,
+        out RingBufferWaveProvider provider)
     {
         var output = new WasapiOut(device, AudioClientShareMode.Shared, useEventSync: useEventSync, latency: renderLatencyMs);
         try
         {
-            var provider = new RingBufferWaveProvider(
+            provider = new RingBufferWaveProvider(
                 ring,
                 output.OutputWaveFormat,
                 onUnderrun,
                 prebufferMs: prebufferMs,
-                maxBacklogMs: maxBacklogMs,
-                targetBacklogMs: prebufferMs);
+                maxBacklogMs: maxBacklogMs);
             output.Init(provider);
             return output;
         }
@@ -991,6 +1236,37 @@ public sealed class AudioPipelineEngine : IDisposable
             output.Dispose();
             throw;
         }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    private void ProcessGtcrnOnlyHop(
+        ReadOnlySpan<float> hop16k,
+        double ticksToMs,
+        ref bool downstreamStateClean,
+        ref double gtcrnInfMs,
+        ref float lastOutputRms,
+        ref float lastOutputPeak,
+        bool applyFadeInFromZero)
+    {
+        ReadOnlySpan<float> current = hop16k;
+        if (_gtcrnEnabled && _gtcrnStage is { IsInitialized: true })
+        {
+            long t0 = Stopwatch.GetTimestamp();
+            _gtcrnStage.ProcessFrame(current, _gtcrnOut256);
+            gtcrnInfMs += (Stopwatch.GetTimestamp() - t0) * ticksToMs;
+            current = _gtcrnOut256;
+            downstreamStateClean = false;
+        }
+
+        current.CopyTo(_hopOutput256);
+        if (applyFadeInFromZero)
+        {
+            _lastEmittedSample16k = 0f;
+            Request16kCrossfade(64);
+        }
+        Apply16kTransitionCrossfade(_hopOutput256);
+        lastOutputRms = WasapiPcmConverter.ComputeRmsAndPeak(_hopOutput256, out lastOutputPeak);
+        WriteOutputToRings(_hopOutput256);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
@@ -1044,6 +1320,7 @@ public sealed class AudioPipelineEngine : IDisposable
                 }
                 voxStagingCount = remaining;
 
+                Apply16kTransitionCrossfade(voxOutSpan);
                 lastOutputRms = WasapiPcmConverter.ComputeRmsAndPeak(voxOutSpan, out lastOutputPeak);
                 WriteOutputToRings(voxOutSpan);
             }
@@ -1052,15 +1329,50 @@ public sealed class AudioPipelineEngine : IDisposable
         {
             voxStagingCount = 0;
             current.CopyTo(_hopOutput256);
+            Apply16kTransitionCrossfade(_hopOutput256);
             lastOutputRms = WasapiPcmConverter.ComputeRmsAndPeak(_hopOutput256, out lastOutputPeak);
             WriteOutputToRings(_hopOutput256);
         }
+    }
+
+    private void Request16kCrossfade(int samples)
+    {
+        _crossfade16kTotalSamples = Math.Max(1, samples);
+        _crossfade16kSamplesRemaining = _crossfade16kTotalSamples;
+    }
+
+    private void Apply16kTransitionCrossfade(Span<float> samples)
+    {
+        if (samples.IsEmpty)
+        {
+            return;
+        }
+
+        int remaining = _crossfade16kSamplesRemaining;
+        if (remaining > 0)
+        {
+            int totalRamp = Math.Max(remaining, _crossfade16kTotalSamples);
+            int startStep = totalRamp - remaining;
+            int count = Math.Min(samples.Length, remaining);
+            float anchor = _lastEmittedSample16k;
+
+            for (int i = 0; i < count; i++)
+            {
+                float alpha = (startStep + i + 1) / (float)totalRamp;
+                samples[i] = anchor * (1f - alpha) + samples[i] * alpha;
+            }
+
+            _crossfade16kSamplesRemaining = remaining - count;
+        }
+
+        _lastEmittedSample16k = samples[^1];
     }
 
     private void WriteOutputToRings(ReadOnlySpan<float> samples16k, bool isDigitalSilence = false)
     {
         if (isDigitalSilence)
         {
+            _lastEmittedSample16k = 0f;
             _silentOutputHops++;
             if (_silentOutputHops > 2)
             {
@@ -1072,10 +1384,10 @@ public sealed class AudioPipelineEngine : IDisposable
                     _monitorSilenceFrac = 0;
                 }
 
-                WriteSilenceSamples(_primaryOutRing, samples16k.Length, _primaryRenderRate, ref _primarySilenceFrac);
+                WriteTrimmedSilence(_primaryOutRing, samples16k.Length, _primaryRenderRate, ref _primarySilenceFrac);
                 if (_monitorLoopbackEnabled && _monitorOut is not null && !_monitorSharesPrimaryDevice)
                 {
-                    WriteSilenceSamples(_monitorOutRing, samples16k.Length, _monitorRenderRate, ref _monitorSilenceFrac);
+                    WriteTrimmedSilence(_monitorOutRing, samples16k.Length, _monitorRenderRate, ref _monitorSilenceFrac);
                 }
                 return;
             }
@@ -1110,6 +1422,29 @@ public sealed class AudioPipelineEngine : IDisposable
         }
     }
 
+    private void WriteTrimmedSilence(AudioRingBuffer ring, int requested16kCount, int outputSampleRate, ref int fracRemainder)
+    {
+        int safeRate = Math.Max(1, outputSampleRate);
+        int keepAliveSamples = (safeRate * (22 + _adaptiveExtraCushionMs / 2)) / 1000;
+        int availOut = ring.AvailableRead;
+        int step8Ms = Math.Max(1, (safeRate * 8) / 1000);
+
+        int emit16k = requested16kCount;
+        if (availOut > keepAliveSamples * 2)
+        {
+            emit16k = 0;
+        }
+        else if (availOut > keepAliveSamples + step8Ms)
+        {
+            emit16k = requested16kCount / 2;
+        }
+
+        if (emit16k > 0)
+        {
+            WriteSilenceSamples(ring, emit16k, safeRate, ref fracRemainder);
+        }
+    }
+
     private void WriteSilenceSamples(AudioRingBuffer ring, int samples16kCount, int outputSampleRate, ref int fracRemainder)
     {
         long num = (long)samples16kCount * Math.Max(1, outputSampleRate) + fracRemainder;
@@ -1124,15 +1459,17 @@ public sealed class AudioPipelineEngine : IDisposable
         }
     }
 
-    private double ComputeTotalLatencyMs()
+    private double ComputeTotalLatencyMs(bool? voxOverrideActive = null)
     {
         double algoMs = _inputResampler.AlgorithmicDelayMs + _primaryOutResampler.AlgorithmicDelayMs;
+        bool voxCurrentlyActive = voxOverrideActive
+            ?? (_voxLockEnabled && _voxLockBackend is { IsInitialized: true, IsSessionLoaded: true, HasEnrolledVoiceprint: true });
 
         // Framing + STFT overlap latency:
         // - VoxLock active: 24 ms STFT OLA + chunk frame (32 ms at K=4), where 16 ms hops accumulate inside the frame.
         // - GTCRN only: 16 ms hop framing + 16 ms STFT lookahead.
         // - Bypass / VAD only: 16 ms hop framing.
-        if (_voxLockEnabled && _voxLockBackend is { IsInitialized: true, HasEnrolledVoiceprint: true })
+        if (voxCurrentlyActive && _voxLockBackend is not null)
         {
             double frameMs = _voxLockBackend.FrameSizeSamples * 1000.0 / DspSampleRate;
             algoMs += 24.0 + Math.Max(16.0, frameMs);
@@ -1191,19 +1528,83 @@ public sealed class AudioPipelineEngine : IDisposable
         _dspWarmupReady.Dispose();
     }
 
+    internal static void VerifyMicroUnderrunImmediateRecoveryForSelfTest()
+    {
+        var ring = new AudioRingBuffer(32768);
+        long underruns = 0;
+        WaveFormat fmt = WaveFormat.CreateIeeeFloatWaveFormat(48000, 1);
+        var provider = new RingBufferWaveProvider(
+            ring,
+            fmt,
+            () => Interlocked.Increment(ref underruns),
+            prebufferMs: StandardOutputPrebufferMs,
+            maxBacklogMs: StandardOutputMaxBacklogMs);
+
+        // 1. Prebuffer 50 ms (2400 samples @ 48 kHz) and drain initial 10 ms (480 samples).
+        float[] initial = new float[2400];
+        for (int i = 0; i < initial.Length; i++)
+        {
+            initial[i] = 0.25f * MathF.Sin(2f * MathF.PI * 220f * i / 48000f);
+        }
+        ring.Write(initial);
+
+        byte[] outBytes = new byte[480 * sizeof(float)];
+        provider.Read(outBytes, 0, outBytes.Length);
+
+        // 2. Drain remaining samples to trigger a transient micro-underrun.
+        ring.Clear();
+        provider.Read(outBytes, 0, outBytes.Length);
+        if (underruns <= 0)
+        {
+            throw new InvalidOperationException("Expected micro-underrun counter to increment.");
+        }
+
+        // 3. Supply a single 16 ms burst (768 samples < 38 ms = 1824 prebuffer) and verify immediate non-zero output.
+        float[] burst = new float[768];
+        for (int i = 0; i < burst.Length; i++)
+        {
+            burst[i] = 0.35f;
+        }
+        ring.Write(burst);
+        Array.Clear(outBytes);
+        provider.Read(outBytes, 0, outBytes.Length);
+
+        float maxAbs = 0f;
+        ReadOnlySpan<float> emitted = global::System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(outBytes);
+        for (int i = 0; i < emitted.Length; i++)
+        {
+            maxAbs = MathF.Max(maxAbs, MathF.Abs(emitted[i]));
+        }
+
+        if (maxAbs < 0.05f)
+        {
+            throw new InvalidOperationException($"Micro-underrun recovery stalled into hard prebuffer silence (maxAbs={maxAbs:F4}).");
+        }
+
+        // 4. Verify adaptive cushion & base cushion setters remain stable.
+        provider.SetAdaptiveCushionMs(32);
+        provider.SetBaseCushionMs(LowLatencyOutputPrebufferMs, LowLatencyOutputMaxBacklogMs);
+    }
+
     private sealed class RingBufferWaveProvider : IWaveProvider
     {
         private const int CrossfadeSamples = 64; // ~1.33 ms @ 48 kHz linear anti-click ramp
+        private const int HardRebufferEmptyCallbacks = 6; // >= ~60 ms continuous starvation
 
         private readonly AudioRingBuffer _ring;
         private readonly Func<long>? _onUnderrun;
-        private readonly int _prebufferSamples;
-        private readonly int _maxBacklogSamples;
-        private readonly int _targetBacklogSamples;
+        private readonly int _sampleRate;
         private readonly float[] _monoScratch = new float[16384];
 
-        private bool _isOutputBuffering = true;
+        private int _basePrebufferSamples;
+        private int _baseMaxBacklogSamples;
+        private int _dynamicTargetBacklogSamples;
+        private int _dynamicMaxBacklogSamples;
+        private int _adaptiveExtraMs;
+
+        private bool _isInitialPrebuffering = true;
         private bool _hasStartedStreaming;
+        private int _consecutiveEmptyReads;
         private float _lastSampleValue;
         private int _fadeInSamplesRemaining;
 
@@ -1212,18 +1613,48 @@ public sealed class AudioPipelineEngine : IDisposable
             WaveFormat waveFormat,
             Func<long>? onUnderrun,
             int prebufferMs = StandardOutputPrebufferMs,
-            int maxBacklogMs = StandardOutputMaxBacklogMs,
-            int targetBacklogMs = StandardOutputPrebufferMs)
+            int maxBacklogMs = StandardOutputMaxBacklogMs)
         {
             _ring = ring;
             WaveFormat = waveFormat;
             _onUnderrun = onUnderrun;
-            _maxBacklogSamples = Math.Max(1024, (waveFormat.SampleRate * maxBacklogMs) / 1000);
-            _prebufferSamples = Math.Clamp((waveFormat.SampleRate * prebufferMs) / 1000, 256, _maxBacklogSamples);
-            _targetBacklogSamples = Math.Clamp((waveFormat.SampleRate * targetBacklogMs) / 1000, _prebufferSamples, _maxBacklogSamples);
+            _sampleRate = Math.Max(1, waveFormat.SampleRate);
+            SetBaseCushionMs(prebufferMs, maxBacklogMs);
         }
 
         public WaveFormat WaveFormat { get; }
+
+        public void SetBaseCushionMs(int prebufferMs, int maxBacklogMs)
+        {
+            int maxSamples = Math.Max(1024, (_sampleRate * maxBacklogMs) / 1000);
+            int prebufferSamples = Math.Clamp((_sampleRate * prebufferMs) / 1000, 256, maxSamples);
+            Volatile.Write(ref _baseMaxBacklogSamples, maxSamples);
+            Volatile.Write(ref _basePrebufferSamples, prebufferSamples);
+            RecomputeDynamicWatermarks();
+        }
+
+        public void SetAdaptiveCushionMs(int extraMs)
+        {
+            Volatile.Write(ref _adaptiveExtraMs, Math.Clamp(extraMs, 0, 48));
+            RecomputeDynamicWatermarks();
+        }
+
+        private void RecomputeDynamicWatermarks()
+        {
+            int basePre = Volatile.Read(ref _basePrebufferSamples);
+            int baseMax = Volatile.Read(ref _baseMaxBacklogSamples);
+            int extraMs = Volatile.Read(ref _adaptiveExtraMs);
+
+            int maxFloor = Math.Max(1024, baseMax + (_sampleRate * 48) / 1000);
+            int target = basePre + (_sampleRate * extraMs) / 1000;
+            int max = Math.Max(target + (_sampleRate * 24) / 1000, baseMax + (_sampleRate * extraMs) / 1000);
+
+            int clampedTarget = Math.Clamp(target, 256, maxFloor);
+            int clampedMax = Math.Clamp(max, clampedTarget, maxFloor);
+
+            Volatile.Write(ref _dynamicTargetBacklogSamples, clampedTarget);
+            Volatile.Write(ref _dynamicMaxBacklogSamples, clampedMax);
+        }
 
         public int Read(byte[] buffer, int offset, int count)
         {
@@ -1234,23 +1665,27 @@ public sealed class AudioPipelineEngine : IDisposable
                 return 0;
             }
 
-            if (_isOutputBuffering)
+            if (_isInitialPrebuffering)
             {
-                if (_ring.AvailableRead < _prebufferSamples)
+                int prebufferSamples = Volatile.Read(ref _basePrebufferSamples);
+                if (_ring.AvailableRead < prebufferSamples)
                 {
                     EmitBufferingSilence(buffer, offset, totalFrames, blockAlign);
                     return totalFrames * blockAlign;
                 }
 
-                _isOutputBuffering = false;
+                _isInitialPrebuffering = false;
+                _consecutiveEmptyReads = 0;
                 _fadeInSamplesRemaining = CrossfadeSamples;
             }
 
             // Consumer-side Drop-Oldest watermark so output buffer never snowballs latency.
+            int targetBacklog = Volatile.Read(ref _dynamicTargetBacklogSamples);
+            int maxBacklog = Math.Max(targetBacklog, Volatile.Read(ref _dynamicMaxBacklogSamples));
             int avail = _ring.AvailableRead;
-            if (avail > _maxBacklogSamples)
+            if (avail > maxBacklog)
             {
-                _ring.Skip(avail - _targetBacklogSamples);
+                _ring.Skip(avail - targetBacklog);
             }
 
             int framesRemaining = totalFrames;
@@ -1265,6 +1700,7 @@ public sealed class AudioPipelineEngine : IDisposable
                 if (read > 0)
                 {
                     _hasStartedStreaming = true;
+                    _consecutiveEmptyReads = 0;
                     if (_fadeInSamplesRemaining > 0)
                     {
                         ApplyFadeIn(span.Slice(0, read));
@@ -1277,8 +1713,16 @@ public sealed class AudioPipelineEngine : IDisposable
                     ApplyFadeOutAndClear(span.Slice(read), tailStart);
 
                     _lastSampleValue = 0f;
-                    _isOutputBuffering = true;
                     _fadeInSamplesRemaining = CrossfadeSamples;
+
+                    if (read == 0)
+                    {
+                        _consecutiveEmptyReads++;
+                        if (_hasStartedStreaming && _consecutiveEmptyReads >= HardRebufferEmptyCallbacks)
+                        {
+                            _isInitialPrebuffering = true;
+                        }
+                    }
 
                     if (_hasStartedStreaming)
                     {

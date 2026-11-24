@@ -54,6 +54,7 @@ public sealed class CpuAffinityManager
     private static int _processBoostRefCount;
     private static ProcessPriorityClass? _savedProcessPriorityClass;
     private static bool _powerThrottlingDisabled;
+    private static bool _timerResolutionActive;
 
     private CpuTopologyInfo? _cachedTopology;
 
@@ -84,6 +85,45 @@ public sealed class CpuAffinityManager
             processorGroup = pCoreGroup;
             description = $"Auto P-Cores ({pCoreCount} cores)";
             return pCoreMask;
+        }
+
+        processorGroup = topology.RecommendedProcessorGroup;
+        description = topology.RecommendedDescription;
+        return topology.RecommendedCoreMask;
+    }
+
+    /// <summary>
+    /// Returns an expanded CPU affinity mask used when the default E-Core or tail-core subset
+    /// experiences thermal/scheduling saturation under extreme system load.
+    /// </summary>
+    public ulong GetOverloadEscapeMask(out ushort processorGroup, out string description)
+    {
+        CpuTopologyInfo topology = GetTopology();
+        if (topology.IsHeterogeneous &&
+            TryGetPerformanceCoresMask(topology, out ulong pCoreMask, out ushort pCoreGroup, out int pCoreCount))
+        {
+            processorGroup = pCoreGroup;
+            description = $"Auto P-Cores ({pCoreCount} cores)";
+            return pCoreMask;
+        }
+
+        ushort targetGroup = topology.RecommendedProcessorGroup;
+        ulong allCoresMask = 0;
+        int coreCount = 0;
+        foreach (PhysicalCoreInfo core in topology.PhysicalCores)
+        {
+            if (core.ProcessorGroup == targetGroup)
+            {
+                allCoresMask |= core.LogicalProcessorMask;
+                coreCount++;
+            }
+        }
+
+        if (allCoresMask != 0)
+        {
+            processorGroup = targetGroup;
+            description = $"Auto All Cores ({coreCount} cores)";
+            return allCoresMask;
         }
 
         processorGroup = topology.RecommendedProcessorGroup;
@@ -132,7 +172,7 @@ public sealed class CpuAffinityManager
     /// </summary>
     public AffinityBindResult BindCurrentThread(
         ulong mask,
-        ThreadPriority priority = ThreadPriority.AboveNormal,
+        ThreadPriority priority = ThreadPriority.Highest,
         ushort processorGroup = 0)
     {
         if (mask == 0)
@@ -148,6 +188,7 @@ public sealed class CpuAffinityManager
 
         Thread.CurrentThread.Priority = priority;
         IntPtr currentThread = NativeMethods.GetCurrentThread();
+        TryDisableThreadPowerThrottling(currentThread);
 
         CpuTopologyInfo topology = GetTopology();
         bool useGroupAffinity = processorGroup > 0 || topology.ProcessorGroupCount > 1;
@@ -360,7 +401,7 @@ public sealed class CpuAffinityManager
         IReadOnlyList<int> threadIds,
         ulong mask,
         ushort processorGroup = 0,
-        ThreadPriority priority = ThreadPriority.AboveNormal)
+        ThreadPriority priority = ThreadPriority.Highest)
     {
         if (threadIds.Count == 0)
         {
@@ -386,6 +427,7 @@ public sealed class CpuAffinityManager
             try
             {
                 bool prioritySet = NativeMethods.SetThreadPriority(hThread, win32Priority);
+                TryDisableThreadPowerThrottling(hThread);
 
                 if (mask == 0)
                 {
@@ -455,6 +497,18 @@ public sealed class CpuAffinityManager
                 {
                     // Best-effort boost; continue running if restricted by OS policy.
                 }
+
+                try
+                {
+                    if (NativeMethods.timeBeginPeriod(1) == 0)
+                    {
+                        _timerResolutionActive = true;
+                    }
+                }
+                catch
+                {
+                    // Best-effort 1ms multimedia timer resolution.
+                }
             }
 
             _processBoostRefCount++;
@@ -498,6 +552,19 @@ public sealed class CpuAffinityManager
             }
             finally
             {
+                if (_timerResolutionActive)
+                {
+                    try
+                    {
+                        NativeMethods.timeEndPeriod(1);
+                    }
+                    catch
+                    {
+                        // Ignore timer teardown errors.
+                    }
+                    _timerResolutionActive = false;
+                }
+
                 _savedProcessPriorityClass = null;
                 _powerThrottlingDisabled = false;
             }
@@ -506,7 +573,8 @@ public sealed class CpuAffinityManager
 
     /// <summary>
     /// Registers the calling thread with the Windows MMCSS "Pro Audio" scheduler task and raises
-    /// its MMCSS priority to <c>AVRT_PRIORITY_HIGH</c>. Must be disposed on the same thread.
+    /// its MMCSS priority to <c>AVRT_PRIORITY_CRITICAL</c> (with fallback to <c>AVRT_PRIORITY_HIGH</c>).
+    /// Must be disposed on the same thread.
     /// </summary>
     public static MmcssAudioScope? TryRegisterCurrentThreadProAudio()
     {
@@ -519,7 +587,10 @@ public sealed class CpuAffinityManager
                 return null;
             }
 
-            NativeMethods.AvSetMmThreadPriority(handle, NativeMethods.AvrtPriorityHigh);
+            if (!NativeMethods.AvSetMmThreadPriority(handle, NativeMethods.AvrtPriorityCritical))
+            {
+                NativeMethods.AvSetMmThreadPriority(handle, NativeMethods.AvrtPriorityHigh);
+            }
             return new MmcssAudioScope(handle);
         }
         catch
@@ -544,7 +615,10 @@ public sealed class CpuAffinityManager
             {
                 try
                 {
-                    NativeMethods.AvSetMmThreadPriority(handle, NativeMethods.AvrtPriorityHigh);
+                    if (!NativeMethods.AvSetMmThreadPriority(handle, NativeMethods.AvrtPriorityCritical))
+                    {
+                        NativeMethods.AvSetMmThreadPriority(handle, NativeMethods.AvrtPriorityHigh);
+                    }
                 }
                 catch
                 {
@@ -606,6 +680,34 @@ public sealed class CpuAffinityManager
             NativeMethods.ProcessPowerThrottling,
             ref state,
             (uint)Marshal.SizeOf<NativeMethods.ProcessPowerThrottlingState>());
+    }
+
+    private static void TryDisableThreadPowerThrottling(IntPtr threadHandle)
+    {
+        if (threadHandle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        try
+        {
+            var state = new NativeMethods.ProcessPowerThrottlingState
+            {
+                Version = NativeMethods.ThreadPowerThrottlingCurrentVersion,
+                ControlMask = NativeMethods.ThreadPowerThrottlingExecutionSpeed,
+                StateMask = 0u
+            };
+
+            NativeMethods.SetThreadInformation(
+                threadHandle,
+                NativeMethods.ThreadPowerThrottling,
+                ref state,
+                (uint)Marshal.SizeOf<NativeMethods.ProcessPowerThrottlingState>());
+        }
+        catch
+        {
+            // Ignore on older Windows builds lacking ThreadPowerThrottling.
+        }
     }
 
     private static void TryResetProcessPowerThrottling(IntPtr processHandle)
@@ -751,21 +853,42 @@ public sealed class CpuAffinityManager
         }
         else
         {
-            // Homogeneous CPU (e.g. AMD): pick the last 2 logical processors in the highest group.
+            // Homogeneous CPU (e.g. AMD): pick the last 2-3 physical cores (1 LP per core when >=3 cores)
+            // so VoxLock intra-op threads never contend on a single SMT core under system load.
             recommendedGroup = rawCores.Max(c => c.Group);
-            var logicalsInGroup = new List<int>();
-            foreach (var core in rawCores.Where(c => c.Group == recommendedGroup))
+            var groupCoreMasks = new List<ulong>();
+            foreach (var core in rawCores)
             {
-                ExtractBitIndices(core.Mask, logicalsInGroup);
+                if (core.Group == recommendedGroup)
+                {
+                    groupCoreMasks.Add(core.Mask);
+                }
             }
 
-            logicalsInGroup.Sort();
-            int takeCount = Math.Min(2, logicalsInGroup.Count);
-            for (int i = logicalsInGroup.Count - takeCount; i < logicalsInGroup.Count; i++)
+            int takeCores = groupCoreMasks.Count >= 4 ? 3 : Math.Min(2, groupCoreMasks.Count);
+            bool singleLpPerCore = groupCoreMasks.Count >= 3;
+            int startIdx = Math.Max(0, groupCoreMasks.Count - takeCores);
+
+            for (int i = startIdx; i < groupCoreMasks.Count; i++)
             {
-                int lp = logicalsInGroup[i];
-                tailLogicalSet.Add((recommendedGroup, lp));
-                recommendedMask |= 1UL << lp;
+                ulong coreMask = groupCoreMasks[i];
+                ulong selectedMask = singleLpPerCore ? (coreMask & (0UL - coreMask)) : coreMask;
+                recommendedMask |= selectedMask;
+
+                if (singleLpPerCore)
+                {
+                    int firstLp = BitOperations.TrailingZeroCount(selectedMask);
+                    tailLogicalSet.Add((recommendedGroup, firstLp));
+                }
+                else
+                {
+                    var lps = new List<int>(4);
+                    ExtractBitIndices(selectedMask, lps);
+                    foreach (int lp in lps)
+                    {
+                        tailLogicalSet.Add((recommendedGroup, lp));
+                    }
+                }
             }
         }
 
@@ -823,7 +946,7 @@ public sealed class CpuAffinityManager
         var cores = new List<PhysicalCoreInfo>(count);
         ulong recMask = 0;
 
-        int tailStart = Math.Max(0, count - 2);
+        int tailStart = count >= 6 ? count - 3 : Math.Max(0, count - 2);
         for (int i = 0; i < count; i++)
         {
             ulong bit = 1UL << i;
@@ -902,6 +1025,22 @@ public sealed class CpuAffinityManager
             return $"Auto P-Cores ({pCoreCount} cores)";
         }
 
+        ulong allGroupMask = 0;
+        int groupCoreCount = 0;
+        foreach (PhysicalCoreInfo core in topology.PhysicalCores)
+        {
+            if (core.ProcessorGroup == group)
+            {
+                allGroupMask |= core.LogicalProcessorMask;
+                groupCoreCount++;
+            }
+        }
+
+        if (allGroupMask != 0 && mask == allGroupMask)
+        {
+            return $"Auto All Cores ({groupCoreCount} cores)";
+        }
+
         string prefix = topology.ProcessorGroupCount > 1 ? $"G{group} " : string.Empty;
         return $"{prefix}LP {lpText} (0x{mask:X})";
     }
@@ -954,7 +1093,12 @@ public sealed class CpuAffinityManager
         public const uint ProcessPowerThrottlingCurrentVersion = 1;
         public const uint ProcessPowerThrottlingExecutionSpeed = 0x1;
 
+        public const int ThreadPowerThrottling = 3;
+        public const uint ThreadPowerThrottlingCurrentVersion = 1;
+        public const uint ThreadPowerThrottlingExecutionSpeed = 0x1;
+
         public const int AvrtPriorityHigh = 1;
+        public const int AvrtPriorityCritical = 2;
 
         [StructLayout(LayoutKind.Sequential)]
         public struct ProcessPowerThrottlingState
@@ -973,11 +1117,25 @@ public sealed class CpuAffinityManager
 
         [DllImport("kernel32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool SetThreadInformation(
+            IntPtr hThread,
+            int threadInformationClass,
+            ref ProcessPowerThrottlingState threadInformation,
+            uint threadInformationSize);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool SetProcessInformation(
             IntPtr hProcess,
             int processInformationClass,
             ref ProcessPowerThrottlingState processInformation,
             uint processInformationSize);
+
+        [DllImport("winmm.dll", SetLastError = false)]
+        public static extern uint timeBeginPeriod(uint uPeriod);
+
+        [DllImport("winmm.dll", SetLastError = false)]
+        public static extern uint timeEndPeriod(uint uPeriod);
 
         [DllImport("avrt.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         public static extern IntPtr AvSetMmThreadCharacteristicsW(string taskName, ref uint taskIndex);

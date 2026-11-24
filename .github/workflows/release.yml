@@ -62,7 +62,9 @@ jobs:
             -p:DebugType=none `
             -p:DebugSymbols=false `
             -o $outDir
-          Get-ChildItem -Path $outDir -Filter "*.lib" -File | Remove-Item -Force
+          Get-ChildItem -Path $outDir -File | Where-Object {
+            $_.Extension -in '.lib', '.pdb' -or $_.Name -like 'onnxruntime_providers_tensorrt*'
+          } | Remove-Item -Force
           Compress-Archive -Path "$outDir/*" -DestinationPath "dist/VoicierVoice-$env:RELEASE_TAG-${{ matrix.rid }}.zip" -CompressionLevel Optimal
 
       - name: Verify win-x64 manifest and smoke paths
@@ -97,13 +99,23 @@ jobs:
           }
           $lines | Set-Content -Path artifacts/SHA256SUMS.txt -Encoding UTF8
 
-      - name: Resolve release tag
+      - name: Checkout tag metadata
+        uses: actions/checkout@v4
+        with:
+          filter: blob:none
+          sparse-checkout: .gitignore
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve release tag and notes
         shell: pwsh
         run: |
           $tag = "${{ github.event.inputs.tag }}"
           if ([string]::IsNullOrWhiteSpace($tag)) {
             $tag = "${{ github.ref_name }}"
           }
+          git fetch origin "refs/tags/${tag}:refs/tags/${tag}" --force 2>$null
+          $tagBody = (git tag -l --format='%(contents)' $tag | Out-String).Trim()
+          [System.IO.File]::WriteAllText("$PWD/release_body.md", $tagBody, [System.Text.UTF8Encoding]::new($false))
           Add-Content -Path $env:GITHUB_ENV -Value "RELEASE_TAG=$tag"
 
       - name: Create GitHub Release
@@ -111,6 +123,7 @@ jobs:
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           name: VoicierVoice ${{ env.RELEASE_TAG }}
+          body_path: release_body.md
           generate_release_notes: true
           files: |
             artifacts/*.zip

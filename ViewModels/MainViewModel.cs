@@ -100,6 +100,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 {
     private readonly VoiceLockController _controller;
     private readonly Dispatcher _dispatcher;
+    private readonly Action _applyLatestTelemetryUiAction;
 
     private bool _isHydrating;
     private bool _updatingPipelineFlagFromTelemetry;
@@ -107,6 +108,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private bool _disposed;
 
     private TelemetrySnapshot? _latestSnapshot;
+    private int _uiTelemetryQueued;
+    private PipelineRunState _lastTrayRunState = PipelineRunState.Stopped;
+    private bool _lastTraySleeping;
     private string? _latestActiveCoreRawDescription;
     private volatile bool _isWindowActiveForTelemetry = true;
     private long _lastUiTelemetryTick;
@@ -288,6 +292,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
         _dispatcher = Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher;
+        _applyLatestTelemetryUiAction = ApplyPendingUiTelemetry;
 
         _controller.TelemetryUpdated += OnControllerTelemetryUpdated;
         _controller.PipelineFaulted += OnControllerPipelineFaulted;
@@ -308,12 +313,27 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public ObservableCollection<AudioDeviceInfo> RenderDevices { get; } = [];
     public ObservableCollection<CpuCoreItemViewModel> CoreMatrixItems { get; } = [];
 
-    public IReadOnlyList<VoxLockModelVariant> VoxLockVariants { get; } =
-    [
-        VoxLockModelVariant.Int8,
-        VoxLockModelVariant.Int8Full,
-        VoxLockModelVariant.Fp16
-    ];
+    public IReadOnlyList<VoxLockModelVariant> VoxLockVariants { get; } = BuildSupportedVariants();
+
+    private static IReadOnlyList<VoxLockModelVariant> BuildSupportedVariants()
+    {
+        string fp16Path = Path.Combine(AppContext.BaseDirectory, "Assets", "Models", "voxlock", "v2", "chunk_fp16.onnx");
+        if (File.Exists(fp16Path))
+        {
+            return
+            [
+                VoxLockModelVariant.Int8,
+                VoxLockModelVariant.Int8Full,
+                VoxLockModelVariant.Fp16
+            ];
+        }
+
+        return
+        [
+            VoxLockModelVariant.Int8,
+            VoxLockModelVariant.Int8Full
+        ];
+    }
 
     public string AppDataDirectoryPath => AppSettings.GetAppDataDirectory();
 
@@ -1084,7 +1104,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             VadThresholdText = $"{VadThreshold:F2}";
             GtcrnEnabled = settings.GtcrnEnabled;
             VoxLockEnabled = settings.VoxLockEnabled;
-            SelectedVoxLockVariant = settings.VoxLockVariant;
+            SelectedVoxLockVariant = VoxLockVariants.Contains(settings.VoxLockVariant)
+                ? settings.VoxLockVariant
+                : VoxLockModelVariant.Int8;
             VoxLockLowLatencyMode = settings.VoxLockLowLatencyMode;
 
             SelectedComputeBackend = settings.ComputeBackend;
@@ -1360,6 +1382,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                     }
                 }
 
+                if (!_isWindowActiveForTelemetry)
+                {
+                    break;
+                }
+
                 int roundedLatencyMs = (int)Math.Round(snapshot.LatencyMs);
                 if (_cachedLatencyMs != roundedLatencyMs)
                 {
@@ -1386,8 +1413,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                         _controller.CpuTopology);
                 }
 
-                InputLevelPercent = RmsToMeterPercent(snapshot.InputRms);
-                OutputLevelPercent = RmsToMeterPercent(snapshot.OutputRms);
+                double inPct = RmsToMeterPercent(snapshot.InputRms);
+                if ((inPct == 0.0 && InputLevelPercent != 0.0) || Math.Abs(InputLevelPercent - inPct) >= 0.2)
+                {
+                    InputLevelPercent = inPct;
+                }
+
+                double outPct = RmsToMeterPercent(snapshot.OutputRms);
+                if ((outPct == 0.0 && OutputLevelPercent != 0.0) || Math.Abs(OutputLevelPercent - outPct) >= 0.2)
+                {
+                    OutputLevelPercent = outPct;
+                }
 
                 int vadHundredths = (int)Math.Round(snapshot.VadProbability * 100.0);
                 if (_cachedVadProbHundredths != vadHundredths ||
@@ -1496,44 +1532,71 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         });
     }
 
+    internal void SimulateTelemetryForSelfTest(TelemetrySnapshot snapshot) =>
+        OnControllerTelemetryUpdated(this, snapshot);
+
     private void OnControllerTelemetryUpdated(object? sender, TelemetrySnapshot snapshot)
     {
         Volatile.Write(ref _latestSnapshot, snapshot);
 
-        if (snapshot.State == PipelineRunState.Running)
-        {
-            double minIntervalMs = !_isWindowActiveForTelemetry
-                ? 1000.0
-                : (ActiveTab != NavigationTab.Pipeline ? 250.0 : 0.0);
+        bool sleeping = VadEnabled && snapshot.State == PipelineRunState.Running && !snapshot.VadSpeechActive;
 
-            if (minIntervalMs > 0.0)
+        if (!_isWindowActiveForTelemetry)
+        {
+            if (snapshot.State == _lastTrayRunState && sleeping == _lastTraySleeping)
+            {
+                return;
+            }
+
+            _lastTrayRunState = snapshot.State;
+            _lastTraySleeping = sleeping;
+        }
+        else
+        {
+            _lastTrayRunState = snapshot.State;
+            _lastTraySleeping = sleeping;
+
+            if (snapshot.State == PipelineRunState.Running && ActiveTab != NavigationTab.Pipeline)
             {
                 long nowTick = Stopwatch.GetTimestamp();
                 long prevTick = Interlocked.Read(ref _lastUiTelemetryTick);
                 double elapsedMs = (nowTick - prevTick) * 1000.0 / Stopwatch.Frequency;
-                if (elapsedMs < minIntervalMs)
+                if (elapsedMs < 250.0)
                 {
                     return;
                 }
 
                 Interlocked.Exchange(ref _lastUiTelemetryTick, nowTick);
             }
-            else
+            else if (snapshot.State == PipelineRunState.Running)
             {
                 Interlocked.Exchange(ref _lastUiTelemetryTick, Stopwatch.GetTimestamp());
             }
         }
 
-        BeginInvokeOnUi(() =>
+        if (_dispatcher.CheckAccess())
         {
-            if (_disposed)
-            {
-                return;
-            }
+            ApplyPendingUiTelemetry();
+        }
+        else if (Interlocked.CompareExchange(ref _uiTelemetryQueued, 1, 0) == 0)
+        {
+            _dispatcher.BeginInvoke(DispatcherPriority.DataBind, _applyLatestTelemetryUiAction);
+        }
+    }
 
-            TelemetrySnapshot current = Volatile.Read(ref _latestSnapshot) ?? snapshot;
+    private void ApplyPendingUiTelemetry()
+    {
+        Interlocked.Exchange(ref _uiTelemetryQueued, 0);
+        if (_disposed)
+        {
+            return;
+        }
+
+        TelemetrySnapshot? current = Volatile.Read(ref _latestSnapshot);
+        if (current is not null)
+        {
             ApplyTelemetrySnapshot(current);
-        });
+        }
     }
 
     private void OnControllerPipelineFaulted(object? sender, Exception ex)

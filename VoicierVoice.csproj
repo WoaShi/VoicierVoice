@@ -13,7 +13,7 @@
     <PlatformTarget Condition="'$(RuntimeIdentifier)' == 'win-x86'">x86</PlatformTarget>
     <PlatformTarget Condition="'$(PlatformTarget)' == ''">x64</PlatformTarget>
     <ApplicationIcon>Assets\Icons\VoicierVoice.ico</ApplicationIcon>
-    <Version>1.0.4</Version>
+    <Version>1.0.5</Version>
     <Product>VoicierVoice</Product>
     <UseGpuOnnxRuntime Condition="'$(RuntimeIdentifier)' == '' or '$(RuntimeIdentifier)' == 'win-x64'">true</UseGpuOnnxRuntime>
   </PropertyGroup>
@@ -29,11 +29,21 @@
     <None Update="Assets\Models\**">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Remove="Assets\Models\voxlock\v2\chunk_fp16.onnx;Assets\Models\voxlock\v2\enroll_fp16.onnx"
+          Condition="'$(RuntimeIdentifier)' == 'win-arm64'" />
     <Resource Include="Assets\Images\HomeHero.jpg" />
     <Resource Include="Assets\Icons\VoicierVoice.ico" />
     <Resource Include="Assets\Icons\VoicierVoice.png" />
     <Resource Include="Assets\Icons\VoicierVoice-bw.ico" />
     <Resource Include="Assets\Icons\VoicierVoice-bw.png" />
   </ItemGroup>
+
+  <Target Name="PruneUnusedNativeProviders" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <_PrunedPublishFiles Include="@(ResolvedFileToPublish)"
+                           Condition="$([System.String]::Copy('%(Filename)%(Extension)').StartsWith('onnxruntime_providers_tensorrt', System.StringComparison.OrdinalIgnoreCase)) or '%(Extension)' == '.lib' or '%(Extension)' == '.pdb'" />
+      <ResolvedFileToPublish Remove="@(_PrunedPublishFiles)" />
+    </ItemGroup>
+  </Target>
 
 </Project>

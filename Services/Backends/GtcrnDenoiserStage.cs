@@ -1,5 +1,7 @@
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 using Microsoft.ML.OnnxRuntime;
 using VoiceLockStudio.Models;
 using VoiceLockStudio.Services.Audio;
@@ -33,6 +35,8 @@ public sealed class GtcrnDenoiserStage : IAudioFilterStage
     private int[] _bitRev = [];
     private float[] _twiddleCos = [];
     private float[] _twiddleSin = [];
+    private float[][] _stageCos = [];
+    private float[][] _stageSin = [];
     private float[] _realTwiddleCos = [];
     private float[] _realTwiddleSin = [];
     private float[] _fftReal = [];
@@ -477,6 +481,32 @@ public sealed class GtcrnDenoiserStage : IAudioFilterStage
             _realTwiddleCos[k] = (float)Math.Cos(angle);
             _realTwiddleSin[k] = (float)Math.Sin(angle);
         }
+
+        int stageCount = 0;
+        for (int len = 8; len <= m; len <<= 1)
+        {
+            stageCount++;
+        }
+
+        _stageCos = new float[stageCount][];
+        _stageSin = new float[stageCount][];
+        int sIdx = 0;
+        for (int len = 8; len <= m; len <<= 1)
+        {
+            int half = len >> 1;
+            int step = m / len;
+            var sc = new float[half];
+            var ss = new float[half];
+            for (int j = 0; j < half; j++)
+            {
+                int tw = j * step;
+                sc[j] = _twiddleCos[tw];
+                ss[j] = _twiddleSin[tw];
+            }
+            _stageCos[sIdx] = sc;
+            _stageSin[sIdx] = ss;
+            sIdx++;
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
@@ -495,23 +525,124 @@ public sealed class GtcrnDenoiserStage : IAudioFilterStage
             }
         }
 
-        float[] cosTable = _twiddleCos;
-        float[] sinTable = _twiddleSin;
         float sinSign = inverse ? 1f : -1f;
 
-        for (int len = 2; len <= n; len <<= 1)
+        // Unrolled stage len = 2 (half = 1, twiddle = 1 + 0i)
+        if (n >= 2)
+        {
+            for (int i = 0; i < n; i += 2)
+            {
+                float ur = real[i];
+                float ui = imag[i];
+                float vr = real[i + 1];
+                float vi = imag[i + 1];
+
+                real[i] = ur + vr;
+                imag[i] = ui + vi;
+                real[i + 1] = ur - vr;
+                imag[i + 1] = ui - vi;
+            }
+        }
+
+        // Unrolled stage len = 4 (half = 2, j=0 is 1+0i, j=1 is 0 +/- 1i)
+        if (n >= 4)
+        {
+            for (int i = 0; i < n; i += 4)
+            {
+                float ur0 = real[i];
+                float ui0 = imag[i];
+                float vr0 = real[i + 2];
+                float vi0 = imag[i + 2];
+
+                real[i] = ur0 + vr0;
+                imag[i] = ui0 + vi0;
+                real[i + 2] = ur0 - vr0;
+                imag[i + 2] = ui0 - vi0;
+
+                float ur1 = real[i + 1];
+                float ui1 = imag[i + 1];
+                float tr1 = -sinSign * imag[i + 3];
+                float ti1 = sinSign * real[i + 3];
+
+                real[i + 1] = ur1 + tr1;
+                imag[i + 1] = ui1 + ti1;
+                real[i + 3] = ur1 - tr1;
+                imag[i + 3] = ui1 - ti1;
+            }
+        }
+
+        ref float rRef = ref MemoryMarshal.GetArrayDataReference(real);
+        ref float iRef = ref MemoryMarshal.GetArrayDataReference(imag);
+        Vector256<float> vSinSign256 = Vector256.Create(sinSign);
+        Vector128<float> vSinSign128 = Vector128.Create(sinSign);
+
+        int sIdx = 0;
+        for (int len = 8; len <= n; len <<= 1, sIdx++)
         {
             int half = len >> 1;
-            int step = n / len;
+            float[] stageCos = _stageCos[sIdx];
+            float[] stageSin = _stageSin[sIdx];
+            ref float scRef = ref MemoryMarshal.GetArrayDataReference(stageCos);
+            ref float ssRef = ref MemoryMarshal.GetArrayDataReference(stageSin);
 
             for (int i = 0; i < n; i += len)
             {
-                int twIdx = 0;
-                for (int j = 0; j < half; j++)
+                int j = 0;
+                if (Vector256.IsHardwareAccelerated && half >= 8)
                 {
-                    float wr = cosTable[twIdx];
-                    float wi = sinSign * sinTable[twIdx];
-                    twIdx += step;
+                    for (; j <= half - 8; j += 8)
+                    {
+                        nuint uOff = (nuint)(i + j);
+                        nuint vOff = (nuint)(i + j + half);
+                        nuint twOff = (nuint)j;
+
+                        Vector256<float> wr = Vector256.LoadUnsafe(ref scRef, twOff);
+                        Vector256<float> wi = Vector256.LoadUnsafe(ref ssRef, twOff) * vSinSign256;
+
+                        Vector256<float> vr = Vector256.LoadUnsafe(ref rRef, vOff);
+                        Vector256<float> vi = Vector256.LoadUnsafe(ref iRef, vOff);
+                        Vector256<float> ur = Vector256.LoadUnsafe(ref rRef, uOff);
+                        Vector256<float> ui = Vector256.LoadUnsafe(ref iRef, uOff);
+
+                        Vector256<float> tr = (wr * vr) - (wi * vi);
+                        Vector256<float> ti = (wr * vi) + (wi * vr);
+
+                        (ur + tr).StoreUnsafe(ref rRef, uOff);
+                        (ui + ti).StoreUnsafe(ref iRef, uOff);
+                        (ur - tr).StoreUnsafe(ref rRef, vOff);
+                        (ui - ti).StoreUnsafe(ref iRef, vOff);
+                    }
+                }
+                else if (Vector128.IsHardwareAccelerated && half >= 4)
+                {
+                    for (; j <= half - 4; j += 4)
+                    {
+                        nuint uOff = (nuint)(i + j);
+                        nuint vOff = (nuint)(i + j + half);
+                        nuint twOff = (nuint)j;
+
+                        Vector128<float> wr = Vector128.LoadUnsafe(ref scRef, twOff);
+                        Vector128<float> wi = Vector128.LoadUnsafe(ref ssRef, twOff) * vSinSign128;
+
+                        Vector128<float> vr = Vector128.LoadUnsafe(ref rRef, vOff);
+                        Vector128<float> vi = Vector128.LoadUnsafe(ref iRef, vOff);
+                        Vector128<float> ur = Vector128.LoadUnsafe(ref rRef, uOff);
+                        Vector128<float> ui = Vector128.LoadUnsafe(ref iRef, uOff);
+
+                        Vector128<float> tr = (wr * vr) - (wi * vi);
+                        Vector128<float> ti = (wr * vi) + (wi * vr);
+
+                        (ur + tr).StoreUnsafe(ref rRef, uOff);
+                        (ui + ti).StoreUnsafe(ref iRef, uOff);
+                        (ur - tr).StoreUnsafe(ref rRef, vOff);
+                        (ui - ti).StoreUnsafe(ref iRef, vOff);
+                    }
+                }
+
+                for (; j < half; j++)
+                {
+                    float wr = stageCos[j];
+                    float wi = sinSign * stageSin[j];
 
                     int u = i + j;
                     int v = u + half;

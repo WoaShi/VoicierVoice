@@ -35,6 +35,7 @@ public interface IAudioFilterStage : IDisposable
     int FrameSizeSamples { get; }
     int SampleRate { get; }
     bool IsInitialized { get; }
+    bool IsSessionLoaded => IsInitialized;
 
     /// <summary>
     /// Initializes model sessions, pre-allocated scratch buffers, and stage parameters.
@@ -51,6 +52,12 @@ public interface IAudioFilterStage : IDisposable
     /// Clears streaming recurrent/STFT state between utterances or pipeline restarts.
     /// </summary>
     void ResetState();
+
+    /// <summary>
+    /// Clears only short-term STFT/OLA staging buffers after an overrun skip or transient bypass
+    /// without erasing recurrent speaker-tracking memory.
+    /// </summary>
+    void SoftResetStreamingBuffers() => ResetState();
 
     /// <summary>
     /// Executes dummy warmup inference(s) so ONNX Runtime allocates arenas/kernels

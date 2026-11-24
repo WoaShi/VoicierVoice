@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "1.0.4",
+    [string]$Version = "1.0.5",
     [string]$Configuration = "Release",
     [string[]]$Rids = @("win-x64", "win-arm64"),
     [switch]$SkipSelfTest
@@ -41,8 +41,10 @@ foreach ($Rid in $Rids) {
         throw "dotnet publish failed for $Rid with exit code $LASTEXITCODE"
     }
 
-    # Remove static import .lib files copied by ONNX Runtime native targets; not needed at runtime.
-    Get-ChildItem -Path $StageDir -Filter "*.lib" -File | Remove-Item -Force
+    # Remove static import .lib files, debug .pdb files, and unused TensorRT provider binaries.
+    Get-ChildItem -Path $StageDir -File | Where-Object {
+        $_.Extension -in ".lib", ".pdb" -or $_.Name -like "onnxruntime_providers_tensorrt*"
+    } | Remove-Item -Force
 
     if (-not $SkipSelfTest -and $Rid -eq "win-x64") {
         Write-Host "=== Running self-test on published $StageName ==="

@@ -15,6 +15,7 @@ public sealed class VoiceLockController : IDisposable
 {
     private readonly string _modelsRootDirectory;
     private readonly SemaphoreSlim _operationGate = new(1, 1);
+    private readonly object _idleUnloadLock = new();
 
     private readonly SileroVadStage _vadStage = new();
     private readonly GtcrnDenoiserStage _gtcrnStage = new();
@@ -26,6 +27,7 @@ public sealed class VoiceLockController : IDisposable
 
     private ModelManifest? _manifest;
     private AppSettings _settings;
+    private CancellationTokenSource? _idleUnloadCts;
     private bool _isInitialized;
     private bool _disposed;
 
@@ -83,6 +85,7 @@ public sealed class VoiceLockController : IDisposable
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        CancelScheduledIdleUnload();
 
         await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -107,6 +110,11 @@ public sealed class VoiceLockController : IDisposable
 
             BackendStateChanged?.Invoke(this, EventArgs.Empty);
             VoiceprintChanged?.Invoke(this, EventArgs.Empty);
+
+            if (!_settings.PipelineActive && !_pipelineEngine.IsRunning)
+            {
+                ScheduleIdleSessionUnload();
+            }
         }
         finally
         {
@@ -121,6 +129,7 @@ public sealed class VoiceLockController : IDisposable
     public async Task StartPipelineAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        CancelScheduledIdleUnload();
 
         if (!_isInitialized)
         {
@@ -130,6 +139,7 @@ public sealed class VoiceLockController : IDisposable
         await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            CancelScheduledIdleUnload();
             if (_pipelineEngine.IsRunning)
             {
                 if (!_settings.PipelineActive)
@@ -142,6 +152,10 @@ public sealed class VoiceLockController : IDisposable
 
             await Task.Run(() =>
             {
+                if (_settings.VoxLockEnabled)
+                {
+                    _voxLockBackend.EnsureSessionLoaded();
+                }
                 _pipelineEngine.SetActiveBackend(ResolveActiveComputeBackend(), ActiveProviderSummary);
                 _pipelineEngine.Start(_settings);
             }, cancellationToken).ConfigureAwait(false);
@@ -175,6 +189,8 @@ public sealed class VoiceLockController : IDisposable
                 _settings.PipelineActive = false;
                 _settings.Save();
             }
+
+            ScheduleIdleSessionUnload();
         }
         finally
         {
@@ -200,6 +216,7 @@ public sealed class VoiceLockController : IDisposable
         CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        CancelScheduledIdleUnload();
 
         await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -242,6 +259,35 @@ public sealed class VoiceLockController : IDisposable
         _settings.VoxLockEnabled = voxLockEnabled;
         _settings.Save();
 
+        if (voxLockEnabled && _isInitialized && !_voxLockBackend.IsSessionLoaded)
+        {
+            CancelScheduledIdleUnload();
+            _ = Task.Run(async () =>
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                await _operationGate.WaitAsync().ConfigureAwait(false);
+                try
+                {
+                    if (!_disposed && _isInitialized && _settings.VoxLockEnabled && !_voxLockBackend.IsSessionLoaded)
+                    {
+                        _voxLockBackend.EnsureSessionLoaded();
+                    }
+                }
+                catch
+                {
+                    // Best-effort async reload; StartPipelineAsync or ProcessFrame will handle any error.
+                }
+                finally
+                {
+                    _operationGate.Release();
+                }
+            });
+        }
+
         _pipelineEngine.ApplySettings(_settings);
         _pipelineEngine.SetActiveBackend(ResolveActiveComputeBackend(), ActiveProviderSummary);
     }
@@ -283,6 +329,7 @@ public sealed class VoiceLockController : IDisposable
         CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        CancelScheduledIdleUnload();
 
         await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -335,6 +382,11 @@ public sealed class VoiceLockController : IDisposable
 
             BackendStateChanged?.Invoke(this, EventArgs.Empty);
             VoiceprintChanged?.Invoke(this, EventArgs.Empty);
+
+            if (!wasRunning && !_settings.PipelineActive)
+            {
+                ScheduleIdleSessionUnload();
+            }
         }
         finally
         {
@@ -347,6 +399,7 @@ public sealed class VoiceLockController : IDisposable
         CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        CancelScheduledIdleUnload();
 
         if (!_isInitialized)
         {
@@ -356,9 +409,14 @@ public sealed class VoiceLockController : IDisposable
         await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            CancelScheduledIdleUnload();
             VoiceprintProfileInfo? profile = await EnsureVoiceprintMigratedCoreAsync(forceRebuild, cancellationToken)
                 .ConfigureAwait(false);
             VoiceprintChanged?.Invoke(this, EventArgs.Empty);
+            if (!_pipelineEngine.IsRunning && !_settings.PipelineActive)
+            {
+                ScheduleIdleSessionUnload();
+            }
             return profile;
         }
         finally
@@ -372,6 +430,7 @@ public sealed class VoiceLockController : IDisposable
         CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        CancelScheduledIdleUnload();
 
         if (!_isInitialized)
         {
@@ -385,6 +444,7 @@ public sealed class VoiceLockController : IDisposable
         await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            CancelScheduledIdleUnload();
             VoiceprintProfileInfo profile = await Task.Run(() =>
             {
                 VoiceprintProfileInfo enrolled = _voxLockBackend.EnrollVoiceprint(wavPath);
@@ -394,6 +454,10 @@ public sealed class VoiceLockController : IDisposable
             }, cancellationToken).ConfigureAwait(false);
 
             VoiceprintChanged?.Invoke(this, EventArgs.Empty);
+            if (!_pipelineEngine.IsRunning && !_settings.PipelineActive)
+            {
+                ScheduleIdleSessionUnload();
+            }
             return profile;
         }
         finally
@@ -472,9 +536,7 @@ public sealed class VoiceLockController : IDisposable
             _gtcrnStage.Initialize(vadGtcrnOptions);
         }
 
-        int effectiveHopsPerChunk = _settings.ComputeBackend == ComputeBackend.Cpu && _settings.VoxLockLowLatencyMode
-            ? 2
-            : 4;
+        int effectiveHopsPerChunk = _settings.VoxLockLowLatencyMode ? 2 : 4;
 
         var voxLockOptions = new AudioStageOptions(
             ModelsRootDirectory: _modelsRootDirectory,
@@ -547,6 +609,95 @@ public sealed class VoiceLockController : IDisposable
         }, cancellationToken).ConfigureAwait(false);
     }
 
+    private void CancelScheduledIdleUnload()
+    {
+        CancellationTokenSource? cts;
+        lock (_idleUnloadLock)
+        {
+            cts = _idleUnloadCts;
+            _idleUnloadCts = null;
+        }
+
+        if (cts is not null)
+        {
+            try
+            {
+                cts.Cancel();
+            }
+            catch
+            {
+                // Ignore cancellation races.
+            }
+            cts.Dispose();
+        }
+    }
+
+    private void ScheduleIdleSessionUnload()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        var nextCts = new CancellationTokenSource();
+        CancellationTokenSource? prevCts;
+        lock (_idleUnloadLock)
+        {
+            if (_disposed)
+            {
+                nextCts.Dispose();
+                return;
+            }
+
+            prevCts = _idleUnloadCts;
+            _idleUnloadCts = nextCts;
+        }
+
+        if (prevCts is not null)
+        {
+            try
+            {
+                prevCts.Cancel();
+            }
+            catch
+            {
+                // Ignore cancellation races.
+            }
+            prevCts.Dispose();
+        }
+
+        CancellationToken token = nextCts.Token;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(25), token).ConfigureAwait(false);
+                await _operationGate.WaitAsync(token).ConfigureAwait(false);
+                try
+                {
+                    if (!token.IsCancellationRequested &&
+                        !_disposed &&
+                        !_pipelineEngine.IsRunning &&
+                        !_recorderService.IsRecording)
+                    {
+                        _voxLockBackend.UnloadSessionKeepProfile();
+                    }
+                }
+                finally
+                {
+                    _operationGate.Release();
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch
+            {
+                // Best-effort idle unload.
+            }
+        }, CancellationToken.None);
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -555,6 +706,7 @@ public sealed class VoiceLockController : IDisposable
         }
 
         _disposed = true;
+        CancelScheduledIdleUnload();
         _pipelineEngine.Dispose();
         _recorderService.Dispose();
         _voxLockBackend.Dispose();
