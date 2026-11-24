@@ -84,21 +84,6 @@ jobs:
     needs: build-windows
     runs-on: windows-latest
     steps:
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: Generate SHA256SUMS.txt
-        shell: pwsh
-        run: |
-          $lines = Get-ChildItem -Path artifacts -Filter "*.zip" | Sort-Object Name | ForEach-Object {
-            $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-            "$hash  $($_.Name)"
-          }
-          $lines | Set-Content -Path artifacts/SHA256SUMS.txt -Encoding UTF8
-
       - name: Checkout tag metadata
         uses: actions/checkout@v4
         with:
@@ -115,16 +100,38 @@ jobs:
           }
           git fetch origin "refs/tags/${tag}:refs/tags/${tag}" --force 2>$null
           $tagBody = (git tag -l --format='%(contents)' $tag | Out-String).Trim()
-          [System.IO.File]::WriteAllText("$PWD/release_body.md", $tagBody, [System.Text.UTF8Encoding]::new($false))
+          $bodyPath = Join-Path $env:RUNNER_TEMP "release_body.md"
+          [System.IO.File]::WriteAllText($bodyPath, $tagBody, [System.Text.UTF8Encoding]::new($false))
           Add-Content -Path $env:GITHUB_ENV -Value "RELEASE_TAG=$tag"
+          Add-Content -Path $env:GITHUB_ENV -Value "RELEASE_BODY_PATH=$bodyPath"
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate SHA256SUMS.txt
+        shell: pwsh
+        run: |
+          $zips = @(Get-ChildItem -Path artifacts -Filter "*.zip" | Sort-Object Name)
+          if ($zips.Count -lt 2) {
+            throw "Expected at least 2 release zip files in artifacts/, found $($zips.Count)."
+          }
+          $lines = $zips | ForEach-Object {
+            $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
+          }
+          $lines | Set-Content -Path artifacts/SHA256SUMS.txt -Encoding UTF8
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           name: VoicierVoice ${{ env.RELEASE_TAG }}
-          body_path: release_body.md
+          body_path: ${{ env.RELEASE_BODY_PATH }}
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
             artifacts/*.zip
             artifacts/SHA256SUMS.txt
